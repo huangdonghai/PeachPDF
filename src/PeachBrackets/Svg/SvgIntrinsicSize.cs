@@ -71,5 +71,40 @@ namespace PeachBrackets.Svg
             // A size in either axis gives the other the default object size (see ResolveForBox).
             return document.Width is > 0 || document.Height is > 0;
         }
+
+        /// <summary>
+        /// The document's intrinsic <i>dimensions</i>: its root <c>width</c>/<c>height</c> attributes,
+        /// and nothing else. A <c>viewBox</c> does not appear here because, per css-images-3 §4.2.1, a
+        /// document that gives only a <c>viewBox</c> has an intrinsic <i>ratio</i> but no intrinsic
+        /// dimensions - a distinction <see cref="Resolve"/> deliberately erases (it falls back to the
+        /// viewBox extent) and which only a caller applying the default sizing algorithm cares about.
+        /// </summary>
+        public static (double? Width, double? Height) IntrinsicDimensions(SvgDocument? document)
+        {
+            if (document is null)
+                return (null, null);
+
+            return (document.Width is > 0 ? document.Width : null,
+                    document.Height is > 0 ? document.Height : null);
+        }
+
+        /// <summary>
+        /// The document's intrinsic ratio: its root <c>width</c>/<c>height</c> when both are present,
+        /// otherwise its <c>viewBox</c>. Null when the document declares neither, so the caller can tell
+        /// "no size information at all" from "ratio only".
+        /// </summary>
+        public static double? IntrinsicRatio(SvgDocument? document)
+        {
+            if (document is null)
+                return null;
+
+            if (document.Width is { } width and > 0 && document.Height is { } height and > 0)
+                return width / height;
+
+            if (document.ViewBox is { Width: > 0, Height: > 0 } viewBox)
+                return viewBox.Width / viewBox.Height;
+
+            return null;
+        }
     }
 }

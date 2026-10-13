@@ -2466,7 +2466,9 @@ namespace PeachBrackets.Html.Dom
         /// <c>Draft.InlineExtent</c>, a separate, not-yet-built fragment-tree contract change - while an
         /// auto-width block re-derives its content edge fresh from whichever page <paramref name="y"/> falls
         /// in, exactly as it would if <see cref="GetBoxWidth(Canvas, CssBox, double?)"/> were resolving it for the first time there
-        /// (css-break-3 §5.1).
+        /// (css-break-3 §5.1). A box whose auto width is nonetheless definite because of its own
+        /// <c>min</c>/<c>max-width</c> keeps those clamps here too, so the wrap boundary and the box's own
+        /// frame agree - see the clamp itself for what re-deriving without them did.
         /// </summary>
         private static double LineContentRightOf(CssBox blockBox, double y)
         {
@@ -2491,8 +2493,63 @@ namespace PeachBrackets.Html.Dom
                 return blockBox.ClientRight;
             }
 
-            return ContentRightOf(blockBox.ContainingBlock, y)
-                   - blockBox.ActualMarginRight - blockBox.ActualBorderRightWidth - blockBox.ActualPaddingRight;
+            var availableRight = ContentRightOf(blockBox.ContainingBlock, y);
+
+            // The containing block's content edge can only become this box's own wrap boundary after
+            // this box's own min/max-width have had their say - the branch above hands back a ClientRight
+            // GetBoxWidth already clamped, while this one re-derives the edge, and re-deriving it alone
+            // silently dropped the clamps. A `width: auto; max-width: 34em` paragraph then resolved its
+            // own frame from GetBoxWidth (clamped, so the frame really was 34em wide) but wrapped its text
+            // against the full containing block, overflowing the very box it had just been sized to
+            // (table_collapsed_border_resolution's p.intro, where Chrome - which does clamp - wraps at
+            // 34em and this engine wrapped at the page edge).
+            var hasMaxWidth = CssValueParser.IsValidLength(blockBox.MaxWidth);
+            var hasMinWidth = blockBox.MinWidth != "0" && CssValueParser.IsValidLength(blockBox.MinWidth);
+
+            if (!hasMaxWidth && !hasMinWidth)
+            {
+                return availableRight - blockBox.ActualMarginRight
+                       - blockBox.ActualBorderRightWidth - blockBox.ActualPaddingRight;
+            }
+
+            // Reproduces GetBoxWidth's own auto-width arithmetic and clamp order verbatim, in ITS space:
+            // the subtraction of this box's own left/right margin identifies the whole outer width the
+            // containing block offers, ActualBoxSizeIncludedWidth is the difference between the two boxes
+            // `width` can name (border-box under `border-box` sizing, where it is zero, and content-box
+            // under `content-box`, where it is the box's own padding and border), and its removal at the
+            // end turns whichever of the two the clamped value names back into a border-box edge. Margins
+            // only, never this box's own left decoration, on the left: that decoration lives INSIDE the
+            // width being measured, and the containing block's own content-left is what the box's left
+            // edge is measured from.
+            var width = availableRight - blockBox.ContainingBlock.ClientLeft
+                        - blockBox.ActualMarginLeft - blockBox.ActualMarginRight
+                        - blockBox.ActualBoxSizeIncludedWidth;
+
+            var basis = PageAwareWidthBasis(blockBox.ContainingBlock, y);
+
+            if (hasMaxWidth)
+            {
+                width = Math.Min(width, CssValueParser.ParseLength(blockBox.MaxWidth, basis, blockBox));
+            }
+
+            if (hasMinWidth)
+            {
+                width = Math.Max(width, CssValueParser.ParseLength(blockBox.MinWidth, basis, blockBox));
+            }
+
+            // GetBoxWidth's own last floor (css-sizing-3 §3), for the same reason it has one: a max-width
+            // narrow enough to squeeze the edges out would otherwise hand FlowBox a negative available
+            // width. Under `border-box` the border box cannot go below this box's own padding and border,
+            // under `content-box` the content box floors at zero.
+            var minimumUsedWidth = blockBox.BoxSizing.Value is BoxSizingMode.BorderBox
+                ? blockBox.ActualPaddingLeft + blockBox.ActualPaddingRight
+                  + blockBox.ActualBorderLeftWidth + blockBox.ActualBorderRightWidth
+                : 0;
+
+            var borderBoxRight = blockBox.ContainingBlock.ClientLeft + blockBox.ActualMarginLeft
+                                 + Math.Max(width, minimumUsedWidth) + blockBox.ActualBoxSizeIncludedWidth;
+
+            return borderBoxRight - blockBox.ActualBorderRightWidth - blockBox.ActualPaddingRight;
         }
 
         /// <summary>

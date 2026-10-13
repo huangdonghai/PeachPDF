@@ -29,11 +29,27 @@ PdfGenerator generator = new();
 var positionalArgs = new List<string>();
 var benchmarkMode = false;
 var benchmarkIterations = 10;
+
+// --only <slug>[,<slug>…]: regenerate just these showcases instead of every one. Every showcase's HTML
+// is inline in this script and each one is a full GeneratePdf + Save, so refreshing one page otherwise
+// pays for all of them - minutes for "I changed one thing". The manifest write is skipped in this mode
+// (see the footer), since it would otherwise be rewritten listing only the slugs rendered here.
+var onlySlugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
 for (var i = 0; i < args.Length; i++)
 {
     if (args[i] == "--benchmark")
     {
         benchmarkMode = true;
+    }
+    else if (args[i] == "--only" && i + 1 < args.Length)
+    {
+        foreach (var slug in args[i + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            onlySlugs.Add(slug);
+        }
+
+        i++;
     }
     else if (args[i] == "--benchmark-iterations" && i + 1 < args.Length
         && int.TryParse(args[i + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedIterations)
@@ -138,6 +154,12 @@ async Task SaveShowcaseAsync(string slug, string category, string cardTitle, str
         return;
     }
 
+    if (onlySlugs.Count > 0 && !onlySlugs.Contains(slug))
+    {
+        Console.WriteLine($"Skipped {slug} (not in --only)");
+        return;
+    }
+
     var showcaseDocument = await generator.GeneratePdf(sourceHtml, renderConfig);
     using var pdfStream = new MemoryStream();
     showcaseDocument.Save(pdfStream);
@@ -177,6 +199,12 @@ async Task SaveDeclarativeShowcaseAsync(string slug, string category, string car
     // specifically) - a declarative showcase has no comparable "parse this HTML" cost to measure, so it
     // simply doesn't run in that mode rather than writing files a benchmark pass isn't meant to produce.
     if (benchmarkMode) return;
+
+    if (onlySlugs.Count > 0 && !onlySlugs.Contains(slug))
+    {
+        Console.WriteLine($"Skipped {slug} (not in --only, declarative)");
+        return;
+    }
 
     var showcaseDocument = await build(generator);
     using var pdfStream = new MemoryStream();
@@ -1524,10 +1552,13 @@ await SaveShowcaseAsync("background_position_size", "Backgrounds & Borders", "Ba
 
 // --- list-style-image showcase ---
 
-// A small vector SVG sized to match a marker box (roughly one font-height square) rather than the
-// larger svgDotDataUri used above for the background-image showcase's 60px-tall boxes - reusing that
-// larger one here would render at its full 20x20 intrinsic size (list-style-image has no analogue to
-// background-size), overflowing the ~10pt marker box and clipping down to just its solid center.
+// css-lists-3 §3.3 sizes a marker image by the default sizing algorithm with a 1em-square default
+// object size, so the marker box *is* the image's own resolved size - nothing is cropped to fit a box
+// the font described, and a source with no intrinsic dimensions is measured against that em square
+// rather than against the text's line spacing. A gradient (a "generated image": no intrinsic size, no
+// ratio) therefore draws at exactly 1em, and so does a viewBox-only SVG - a viewBox supplies an
+// intrinsic *ratio*, not dimensions, so 10x10 user units fill this page's 8.5pt em instead of drawing
+// at their own 7.5pt.
 var svgMarkerMarkup = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#c0392b"/><circle cx="5" cy="5" r="4" fill="#f1c40f"/></svg>""";
 var svgMarkerDataUri = "data:image/svg+xml;base64," + Convert.ToBase64String(Encoding.UTF8.GetBytes(svgMarkerMarkup));
 
@@ -1568,7 +1599,7 @@ var listHtml = "<!DOCTYPE html><html><head>" + ListCss + "</head><body>" +
     ) +
 
     "<h2>2 — linear-gradient markers</h2>" +
-    "<p class=\"intro\">Each list item marker is a gradient-filled square, sized to the current font height.</p>" +
+    "<p class=\"intro\">A gradient has no intrinsic size, so each marker takes the spec's 1em-square default object size.</p>" +
     Row(
         ListSwatch("to right red→blue", "list-style-image: linear-gradient(to right, red, blue);"),
         ListSwatch("to bottom green→yellow", "list-style-image: linear-gradient(to bottom, green, yellow);"),
@@ -15872,6 +15903,12 @@ await SaveDeclarativeShowcaseAsync("declarative_stylesheet_and_html", "Document 
 if (benchmarkMode)
 {
     PrintBenchmarkReport();
+}
+else if (onlySlugs.Count > 0)
+{
+    // --only rendered a subset, so the in-memory manifest describes only that subset - writing it out
+    // would drop every other showcase from the site's /showcase page.
+    Console.WriteLine("Skipped showcases.json: --only wrote a partial set, leaving the existing manifest alone");
 }
 else
 {

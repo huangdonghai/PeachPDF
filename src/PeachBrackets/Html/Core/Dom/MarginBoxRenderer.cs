@@ -511,7 +511,7 @@ namespace PeachBrackets.Html.Dom
         /// Paints a margin box's own border as four independent edge strokes at
         /// <paramref name="borderBoxRect"/>'s own edges (full width/height each, so adjacent edges
         /// overlap at the corners rather than mitre into each other - see
-        /// <see cref="PaintBackgroundAndBorder"/>'s own remarks on why that's the right call here), via
+        /// <see cref="PaintBackgroundAndBorder(Canvas, Rect, Size, MarginStyleRule, StyleDeclaration?, double, double, double, RenderContext, HtmlContainerInt, Dictionary{string, IReadOnlyList{CssImage}?})"/>'s own remarks on why that's the right call here), via
         /// <see cref="BordersDrawHandler.DrawCollapsedSegment"/> - the same value-based, no-<c>CssBox</c>
         /// primitive already used for collapsed table borders. <c>border-color</c>'s own initial value
         /// is <c>currentcolor</c> (CSS Backgrounds 3 §4), so an edge with no explicit color (or an
@@ -520,7 +520,7 @@ namespace PeachBrackets.Html.Dom
         /// with no <c>color</c> of its own.
         /// Internal (not private) so <c>PdfGenerator</c> can reuse it for the page box's own border - a
         /// distinct paint layer from a page-<em>margin</em>-box's border (this method still paints those
-        /// too, via <see cref="PaintBackgroundAndBorder"/>) but identical box-model math (issue #1147).
+        /// too, via <see cref="PaintBackgroundAndBorder(Canvas, Rect, Size, MarginStyleRule, StyleDeclaration?, double, double, double, RenderContext, HtmlContainerInt, Dictionary{string, IReadOnlyList{CssImage}?})"/>) but identical box-model math (issue #1147).
         /// </summary>
         internal static void PaintBorder(Canvas g, Rect borderBoxRect, StyleDeclaration style,
             double emPt, double remPt, double pixelsPerPoint, RenderContext renderContext)
@@ -634,6 +634,34 @@ namespace PeachBrackets.Html.Dom
                 // The margin box's own text colour, as BuildBrush gives its text (black without one): the root box passed above is only
                 // the geometry stand-in.
                 currentColor: LayeredBackgroundPainter.OwnColor(style, renderContext));
+        }
+
+        /// <summary>
+        /// Canvas-based twin of <see cref="PaintImage(Canvas, CssImage, Rect, string, RenderContext, HtmlContainerInt, double?)"/>: the same <see cref="CssImagePainter"/> call, for
+        /// a backend whose device already is a <see cref="Canvas"/> (raster, Skia) rather than an
+        /// <c>XGraphics</c>. <paramref name="g"/>'s own <see cref="Canvas.PixelsPerPoint"/> plays the role
+        /// <c>PdfSharpAdapter.PixelsPerPoint</c> plays for the PDF path.
+        /// </summary>
+        internal static void PaintImage(
+            Canvas g, CssImage image, Rect rect, string positionList, RenderContext adapter,
+            HtmlContainerInt htmlContainer, double? emSizePt)
+        {
+            if (htmlContainer.Root is not { } rootBox)
+                return;
+
+            var pixelsPerPoint = g.PixelsPerPoint;
+            var paintRect = new Rect(rect.X * pixelsPerPoint, rect.Y * pixelsPerPoint, rect.Width * pixelsPerPoint, rect.Height * pixelsPerPoint);
+
+            CssImagePainter.Paint(g, image, layerIndex: 0,
+                originRect: paintRect, clipRect: paintRect, roundedClipPath: null,
+                positionList: positionList, sizeList: Keywords.Auto, repeatList: "no-repeat",
+                attachmentList: Keywords.Scroll, viewportRect: paintRect, box: rootBox,
+                drawBrush: brush =>
+                {
+                    g.DrawRectangle(brush, paintRect.X, paintRect.Y, paintRect.Width, paintRect.Height);
+                    brush.Dispose();
+                },
+                gradientEmSizePt: emSizePt);
         }
 
         /// <summary>
@@ -1185,7 +1213,7 @@ namespace PeachBrackets.Html.Dom
         /// within the box exactly as text would be, instead of always at the box's content-start.
         /// Mirror of <see cref="BuildAlignment"/> for the image paint path.
         /// </summary>
-        private static string ResolveImagePosition(StyleDeclaration style, StyleDeclaration? pageStyle, string boxName)
+        internal static string ResolveImagePosition(StyleDeclaration style, StyleDeclaration? pageStyle, string boxName)
         {
             var (textAlign, verticalAlign) = ResolveAlignment(style, pageStyle, boxName);
 

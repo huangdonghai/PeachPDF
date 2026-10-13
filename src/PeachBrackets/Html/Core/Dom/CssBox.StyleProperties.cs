@@ -1003,7 +1003,27 @@ namespace PeachBrackets.Html.Dom
             // object. When this box's own area already equals the parent's (the common case), this is a
             // total no-op at both levels - no clone, no new reference even assigned.
             _computedStyle = _computedStyle.SetPropertyValue(_computedStyle.CustomProperties, customProperties, static (s, v) => s with { CustomProperties = v });
-            _computedStyle = _computedStyle.AdoptAreaShared(cache, _computedStyle.Font, parentStyle.Font, static (s, a) => s with { Font = a });
+
+            // font-weight's relative keywords (bolder/lighter) resolve at computed-value time (CSS Fonts 4
+            // §2.2.1), so what a child inherits is the parent's RESOLVED numeric weight, never the keyword.
+            // The Font area is adopted by reference below, which would hand the raw keyword down as-is - the
+            // child then resolves the same keyword a second time against the parent's already-stepped weight
+            // (h1's UA `bolder` → 700, its anonymous text boxes → bolder(700) → 900) and every h1/b/strong
+            // paints one bolder step too heavy. Boxes that declare their own relative keyword re-declare it
+            // over the inherited numeric value in their own cascade pass below, so `<b><b>` still steps.
+            var inheritedFont = parentStyle.Font;
+            if (inheritedFont.FontWeight.Value is { IsKeyword: true, Keyword: FontWeightKeyword.Bolder or FontWeightKeyword.Lighter })
+            {
+                var numeric = p.ActualNumericWeight;
+                inheritedFont = inheritedFont.SetPropertyValue(
+                    inheritedFont.FontWeight,
+                    CssProperty<CssKeywordOrValue<FontWeightKeyword, double>>.FromValue(
+                        numeric.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture),
+                        new CssKeywordOrValue<FontWeightKeyword, double>(null, numeric)),
+                    static (a, v) => a with { FontWeight = v });
+            }
+
+            _computedStyle = _computedStyle.AdoptAreaShared(cache, _computedStyle.Font, inheritedFont, static (s, a) => s with { Font = a });
             var unicodeBidiBeforeInherit = _computedStyle.Text.UnicodeBidi;
             var verticalAlignBeforeInherit = _computedStyle.Text.VerticalAlign;
             var textOverflowBeforeInherit = _computedStyle.Text.TextOverflow;

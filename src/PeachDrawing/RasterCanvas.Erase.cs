@@ -11,7 +11,7 @@ public sealed partial class RasterCanvas
     /// the "destination-out" operation an outer <c>box-shadow</c> needs - the shadow is not painted under its own box
     /// (CSS Backgrounds 3 §7.1.1) - which no <see cref="Canvas"/> primitive expresses.
     /// </summary>
-    public void Erase(GraphicsPath path)
+    public override void Erase(GraphicsPath path)
     {
         var clip = _clips.Peek();
         if (clip.Bounds.IsEmpty)
@@ -26,7 +26,7 @@ public sealed partial class RasterCanvas
     }
 
     /// <summary>Removes the pixels inside the layout-space rectangle <paramref name="rect"/> (see <see cref="Erase(GraphicsPath)"/>).</summary>
-    public void EraseRectangle(Rect rect)
+    public override void EraseRectangle(Rect rect)
     {
         var clip = _clips.Peek();
         if (clip.Bounds.IsEmpty)

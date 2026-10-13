@@ -50,11 +50,17 @@ namespace PeachBrackets.Html.Paint.Content
         {
             CssImagePainter.Paint(g, box.ContentImage!, layerIndex: 0,
                 originRect: rect, clipRect: rect, roundedClipPath: null,
-                // The default (borrowed) list-style-image marker centers the image within its font-
-                // height box, matching today's list-style-image rendering; an author content:url(...)
-                // override (owned) matches ::before/::after's own top-left content-image alignment.
+                // A borrowed list-style-image marker's box is sized from the image itself
+                // (CssBoxMarker.ResolveImageSize, css-lists-3 §3.3), so centering the image within it is
+                // a no-op and the layer is asked for exactly that box - the image is neither stretched to
+                // nor clipped by it. "100% 100%" rather than "auto" because the two only agree while the
+                // painter can re-derive the size the box was cut from: an SVG with a viewBox but no
+                // width/height resolves to the viewBox extent in the paint paths (SvgIntrinsicSize.Resolve)
+                // but to a 1em-contained ratio in the box, and the box is the one that is right. An author
+                // content:url(...) override (owned) keeps ::before/::after's own top-left content-image
+                // alignment and its ordinary "auto" sizing.
                 positionList: box.OwnsContentImage ? "0% 0%" : "center",
-                sizeList: Keywords.Auto, repeatList: "no-repeat",
+                sizeList: box.OwnsContentImage ? Keywords.Auto : "100% 100%", repeatList: "no-repeat",
                 attachmentList: Keywords.Scroll, viewportRect: rect, box: box,
                 drawBrush: brush =>
                 {

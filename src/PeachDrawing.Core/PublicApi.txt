@@ -74,6 +74,8 @@ PeachDrawing.Core.Canvas : abstract class
   method virtual Void DrawRaster(RasterSurface surface)
   method virtual Void DrawString(String str, Font font, PaintColor color, PaintPoint point, Size size, Double letterSpacing, FontPalette fontPalette, ShapeSettings? features, String logicalText)
   method virtual Void DrawStringInRect(String str, Font font, PaintColor color, Rect rect, BoxAlignment horizontal, BoxAlignment vertical, String logicalText = null)
+  method virtual Void Erase(GraphicsPath path)
+  method virtual Void EraseRectangle(Rect rect)
   method virtual Void PopAntiAlias()
   method virtual Void PushAntiAlias(Boolean enabled)
   property Boolean FlattensTransparency { get; }

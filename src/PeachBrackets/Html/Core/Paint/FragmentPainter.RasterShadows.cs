@@ -56,11 +56,11 @@ namespace PeachBrackets.Html.Paint
             if (box.IsRounded)
             {
                 using var boxPath = BuildLayerRoundRect(rg, borderBox, ShadowCornerRadii(box, borderBox, spread: 0), 0);
-                ((PeachDrawing.RasterCanvas)rg).Erase(boxPath);
+                rg.Erase(boxPath);
             }
             else
             {
-                ((PeachDrawing.RasterCanvas)rg).EraseRectangle(borderBox);
+                rg.EraseRectangle(borderBox);
             }
 
             g.DrawRaster(scope.Surface);

@@ -483,6 +483,26 @@ namespace PeachDrawing.Core
         public virtual void DrawRaster(RasterSurface surface) { }
 
         /// <summary>
+        /// Removes the pixels inside <paramref name="path"/> from whatever this canvas is rasterizing: each
+        /// pixel is scaled by one minus the path's anti-aliased coverage, so an edge that is half inside
+        /// keeps half its ink.
+        /// </summary>
+        /// <remarks>
+        /// This is the "destination-out" step an outset <c>box-shadow</c> needs - the shadow is not painted
+        /// under its own box (CSS Backgrounds 3 §7.1.1). It belongs on the base canvas rather than only on
+        /// the software rasterizer because it is asked of whatever graphics a <see cref="BeginRasterSurface"/>
+        /// scope handed out, and that is not necessarily the software rasterizer: a backend that rasterizes
+        /// natively, through its own graphics API, answers it its own way exactly as it answers
+        /// <see cref="DrawRaster"/> - which is the same reason <see cref="BeginRasterSurface"/> and
+        /// <see cref="DrawRaster"/> are virtual here. The base implementation does nothing, which is right
+        /// for a canvas with no raster target to erase from.
+        /// </remarks>
+        public virtual void Erase(GraphicsPath path) { }
+
+        /// <summary>Removes the pixels inside the rectangle <paramref name="rect"/> (see <see cref="Erase(GraphicsPath)"/>).</summary>
+        public virtual void EraseRectangle(Rect rect) { }
+
+        /// <summary>
         /// Whether this instance paints into an offscreen tile (e.g. one returned by
         /// <see cref="CreateTile"/>, used for group opacity and SVG pattern/mask
         /// content) rather than directly into the real page's own content stream. Tagged-PDF output

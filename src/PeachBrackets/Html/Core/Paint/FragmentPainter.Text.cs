@@ -600,23 +600,67 @@ namespace PeachBrackets.Html.Paint
         {
             var hasVerticalMetrics = font.HasVerticalMetrics;
             var hasVerticalOrigin = font.HasVerticalOrigin;
+
+            // Only consulted on the real-vmtx-without-VORG path below, and once per run rather than per
+            // character: the face's ideographic baseline is a property of the face, not of the glyph.
+            var ideographicBaselineEm = hasVerticalMetrics && !hasVerticalOrigin ? IdeographicBaselineEm(font) : 0;
             double offset = 0;
 
             foreach (var (charText, rune, charSize) in CssLayoutEngine.MeasureUprightRunCharacters(g, text, font, wordFeatures))
             {
                 var cellTop = rect.Y + offset;
                 var x = rect.X + Math.Max(0, (rect.Width - charSize.Width) / 2);
-                var y = cellTop + baselineAdjust;
-                if (hasVerticalOrigin)
-                    y += font.GetVerticalOriginY(rune) - font.Ascent;
 
                 var advance = hasVerticalMetrics ? font.GetVerticalAdvance(rune) : font.Height;
+
+                // Where the baseline sits below this character's cell top. A real VORG states it outright
+                // (and is authoritative, per the OpenType spec's own "advance height starts from the
+                // vertical origin" wording). Without one, the plain top-of-cell anchor is the hhea ascent -
+                // which is a HORIZONTAL line-height figure, and a font's hhea ascent is routinely larger
+                // than one em (1.16em for the subset in vertical_writing_mode_background_clip_text), while
+                // a font with real vertical metrics makes the cell the glyph's own vmtx advance, normally
+                // one em. Anchoring at the hhea ascent therefore pushed the bottom of every glyph past its
+                // own cell, and the per-cell clip that real metrics require cut it off: every kanji in that
+                // showcase lost its last fifth. Centre the em box in the cell instead, which is the
+                // placement an upright run gets in Chrome - the em box is one em tall, so its top sits
+                // (advance - em) / 2 below the cell top and, resting on the ideographic baseline ideo, the
+                // baseline therefore sits (advance - em) / 2 + em + ideo below it, which is the
+                // (advance + em) / 2 + ideo below.
+                var cellBaseline = hasVerticalOrigin
+                    ? font.GetVerticalOriginY(rune)
+                    : hasVerticalMetrics
+                        ? (advance + font.Size) / 2 + ideographicBaselineEm * font.Size
+                        : font.Ascent;
+
+                var y = cellTop + cellBaseline - font.Ascent + baselineAdjust;
 
                 yield return new UprightGlyphPlacement(charText, x, y, charSize, cellTop, advance);
 
                 offset += advance + letterSpacing;
             }
         }
+
+        /// <summary>
+        /// How far above the alphabetic baseline the face's ideographic baseline sits, as a fraction of
+        /// the em (negative for a baseline below it) - where the ideographic em box of a CJK glyph rests,
+        /// which an upright run's own in-cell placement reads it for. Answered from the face's
+        /// <c>BASE</c> table when it states one; a face with no usable <c>BASE</c> answers zero, the plain
+        /// "glyph sits on the alphabetic baseline" convention a font with no ideographic data is drawn to.
+        /// </summary>
+        /// <remarks>
+        /// Asked of the font's <see cref="Font.Typeface"/> rather than through
+        /// <see cref="Font.GetBaselineHeightEm"/> deliberately: the latter is a general engine hook whose
+        /// other consumers (SVG's <c>dominant-baseline: ideographic</c> among them) are built on its
+        /// null-means-approximate contract, so wiring this one caller's need into it would move those off
+        /// their own approximation as a side effect. The script tag is left null - the table's default
+        /// script - since the em box a face gives its CJK glyphs is the same across the scripts it covers
+        /// in practice.
+        /// </remarks>
+        private static double IdeographicBaselineEm(Font font) =>
+            font.Typeface is { } typeface
+            && typeface.TryGetBaselineHeight(vertical: true, scriptTag: null, "ideo", out var ems)
+                ? ems
+                : 0;
 
         /// <summary>One character's resolved position within an upright vertical run - see <see cref="EnumerateUprightGlyphPlacements"/>.</summary>
         private readonly record struct UprightGlyphPlacement(string CharText, double X, double Y, Size CharSize, double CellTop, double Advance);

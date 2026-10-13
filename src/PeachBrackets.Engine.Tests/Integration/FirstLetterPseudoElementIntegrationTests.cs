@@ -49,8 +49,10 @@ namespace PeachPDF.Tests.Integration
             var firstLetterBox = b.Boxes.Single(x => x.IsFirstLetterPseudoElement);
             Assert.Equal("H", firstLetterBox.Text);
 
-            // Inherits bold weight from its real structural parent <b> ...
-            Assert.Equal(b.FontWeight, firstLetterBox.FontWeight);
+            // Inherits bold weight from its real structural parent <b> - the COMPUTED weight, since
+            // bolder/lighter resolve at computed-value time (CSS Fonts 4 §2.2.1) and a child inherits
+            // the resolved number, never the keyword to re-step ...
+            Assert.Equal(b.ActualNumericWeight, firstLetterBox.FontWeight.Value!.Value);
             // ... while still picking up the color from the rule matched against <p>, not <b>.
             Assert.Equal("rgb(255, 0, 0)", firstLetterBox.Color);
 

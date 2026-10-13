@@ -1,4 +1,4 @@
-﻿// "Therefore those skilled at the unorthodox
+// "Therefore those skilled at the unorthodox
 // are infinite as heaven and earth,
 // inexhaustible as the great rivers.
 // When they come to an end,
@@ -13,8 +13,10 @@
 using PeachBrackets.Css;
 using PeachBrackets.Html.CounterStyles;
 using PeachDrawing.Core;
+using PeachBrackets.Html.Entities;
 using PeachBrackets.Html.Parse;
 using PeachBrackets.Html.Utils;
+using PeachBrackets.Svg;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
@@ -159,16 +161,110 @@ namespace PeachBrackets.Html.Dom
                 }
                 else if (ContentImage is not null && !_ownsContentImage && Words.Count == 0)
                 {
-                    // Default (procedural) list-style-image marker: sized as a font-height square,
-                    // matching the disc/circle/square/text markers, rather than the generic
-                    // 20px/CSS-width-driven replaced-element fallback base.MeasureWordsSize would use
-                    // for an ordinary content-image box - preserves today's list-style-image sizing.
-                    var size = ActualFont.Height;
-                    Words.Add(new CssRectImage(this) { Width = size, Height = size });
+                    // The image *is* the marker's content, so it decides the marker box's size - see
+                    // ResolveImageSize. Loading it here (rather than in base.MeasureWordsSize, which
+                    // only ensures it before its own later passes) is what makes that resolution
+                    // possible at all: nothing downstream ever revisits this word's measured size.
+                    await ContentImage.EnsureLoadedAsync(HtmlContainer!);
+
+                    var (width, height) = ResolveImageSize(this);
+                    Words.Add(new CssRectImage(this) { Width = width, Height = height });
                 }
             }
 
             await base.MeasureWordsSize(g);
+        }
+
+        /// <summary>
+        /// Resolves a borrowed <c>list-style-image</c> marker's concrete size, in this box's own layout
+        /// units - per css-lists-3 §3.3, "the marker image is sized using the default sizing algorithm
+        /// [css-images-3] with no specified size and a default object size of 1em square". The marker
+        /// box is then exactly that size, so the image is neither stretched to nor clipped by any box
+        /// the font happens to describe.
+        /// </summary>
+        internal static (double Width, double Height) ResolveImageSize(CssBoxMarker marker)
+        {
+            // The spec's default object size is an exact em - the element's own *computed font-size*
+            // (CSS Values 4 §6.1.1), not the font's line spacing. ActualFont.Height is that line
+            // spacing (ascender + descender + line gap: ~1.15em for Arial/Times, ~1.37em for Verdana),
+            // so a box cut from it overshoots an image with no intrinsic size (a gradient marker) by
+            // that much, and undershoots one whose own size is larger. Same PixelsPerPoint conversion
+            // a unitless line-height gets (CssValueParser - GetEmHeight() reports the render context's own
+            // device-scaled font-measurement space, not layout units).
+            var pixelsPerPoint = marker.HtmlContainer?.RenderContext?.LayoutUnitsPerPoint ?? 1.0;
+            var em = marker.GetEmHeight() * pixelsPerPoint;
+
+            var (intrinsicWidth, intrinsicHeight, intrinsicRatio) = IntrinsicSizeOf(marker.ContentImage);
+
+            // Intrinsic dimensions win outright, with no scaling at all - which is exactly why a large
+            // list-style-image renders at its full size in a browser instead of being fitted to the text
+            // it labels, and why the marker box has to follow it rather than the other way round.
+            if (intrinsicWidth is > 0 && intrinsicHeight is > 0)
+                return (intrinsicWidth.Value, intrinsicHeight.Value);
+
+            // An image with an intrinsic ratio but no intrinsic dimensions is *contained* in the default
+            // object size rather than stretched to it (css-images-3 §5.2). This is the viewBox-only SVG:
+            // its viewBox states the artwork's shape, not its size, so treating the viewBox extent as the
+            // image's own size would both ignore the 1em default object size and mis-fit any non-square
+            // source. A square one is the common case and comes out at exactly 1em either way.
+            if (intrinsicRatio is > 0)
+            {
+                var ratio = intrinsicRatio.Value;
+                var width = em;
+                var height = em / ratio;
+
+                if (height > em)
+                {
+                    height = em;
+                    width = em * ratio;
+                }
+
+                return (width, height);
+            }
+
+            // Everything else takes the default object size for every axis it has no answer for: an image
+            // with one usable axis but no ratio is vanishingly rare (a zero-height raster), while a
+            // gradient - a "generated image" - and a URL that never loaded have no size information at
+            // all, so they are the whole 1em square.
+            return (intrinsicWidth is > 0 ? intrinsicWidth.Value : em,
+                    intrinsicHeight is > 0 ? intrinsicHeight.Value : em);
+        }
+
+        /// <summary>
+        /// <paramref name="image"/>'s intrinsic dimensions and intrinsic ratio, converted to layout
+        /// units. Dimensions are null components when it has none (a gradient, a URL that failed to
+        /// load, a viewBox-only SVG) - CSS pixels by way of <see cref="Length.PointsPerPx"/>, the same
+        /// conversion the paint paths apply to the very same image (<c>BackgroundImageDrawHandler</c>,
+        /// <c>CssImagePainter.PaintSvgLayer</c>), so the box this resolves and the image drawn into it
+        /// agree exactly.
+        /// </summary>
+        private static (double? Width, double? Height, double? Ratio) IntrinsicSizeOf(CssImage? image)
+        {
+            (double? Width, double? Height) size;
+            double? ratio = null;
+
+            switch (image)
+            {
+                case CssImage.Url { Image: { } raster }:
+                    size = (raster.Width, raster.Height);
+                    break;
+
+                // A viewBox-only SVG reports no dimensions here but still reports its ratio (see
+                // SvgIntrinsicSize.IntrinsicDimensions) - the pair is what distinguishes it from a
+                // gradient (neither) and from an explicitly-sized SVG (both).
+                case CssImage.Url { SvgDocument: { } svg }:
+                    size = SvgIntrinsicSize.IntrinsicDimensions(svg);
+                    ratio = SvgIntrinsicSize.IntrinsicRatio(svg);
+                    break;
+
+                default:
+                    size = (null, null);
+                    break;
+            }
+
+            return (size.Width is > 0 ? size.Width * Length.PointsPerPx : null,
+                    size.Height is > 0 ? size.Height * Length.PointsPerPx : null,
+                    ratio);
         }
 
         /// <summary>

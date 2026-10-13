@@ -16,9 +16,12 @@ namespace PeachPDF.Tests.Raster
             return new RasterCanvas(RenderContext, surface, pixelsPerPoint);
         }
 
-        private static byte[] Pixel(RasterCanvas g, int x, int y)
+        private static byte[] Pixel(Canvas g, int x, int y)
         {
-            var row = g.Surface.Row(y);
+            // A region's Graphics is typed as Canvas (a backend may supply its own - SkiaHtml rasters
+            // through Skia); every region these tests build comes from RasterSurfaceFactory, so it is the
+            // software rasterizer here.
+            var row = Assert.IsType<RasterCanvas>(g).Surface.Row(y);
             return row.Slice(x * 4, 4).ToArray();
         }
 
