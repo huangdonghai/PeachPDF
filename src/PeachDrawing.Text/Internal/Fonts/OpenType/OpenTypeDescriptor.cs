@@ -28,6 +28,7 @@
 #endregion
 
 using PeachDrawing.Text.Internal.Hinting;
+using PeachDrawing.Text.Internal.Fonts.OpenType.Variations;
 using PeachDrawing.Text.OpenType;
 using PeachDrawing.Text.Outlines;
 using PeachDrawing.Text.Shaping;
@@ -891,31 +892,33 @@ namespace PeachDrawing.Text.Internal.Fonts.OpenType
         }
 
         /// <summary>
-        /// Whether this font has a real <c>VORG</c> table this reader will actually trust. Per the
-        /// OpenType spec, <c>VORG</c> "may only be used in CFF or CFF2 OpenType fonts" and "if present in
-        /// OpenType fonts containing TrueType outline data, it must be ignored" - a font with real
-        /// <c>glyf</c> outlines has to derive its vertical origin from <c>vmtx</c>'s top-side-bearing plus
-        /// the glyph's own bounding-box top instead, which this reader does not implement, so a
-        /// TrueType-flavored font's <c>VORG</c> table (spurious as it would be) is never consulted -
-        /// <see cref="GlyphIndexToVerticalOrigin"/> falls through to its own <c>vhea</c>/<c>os2</c>/
-        /// one-em chain for such a font exactly as it would for one with no <c>VORG</c> at all.
+        /// Whether this font can report a real per-glyph vertical origin. A <c>VORG</c> table supplies one
+        /// outright, and per the OpenType spec may only be used in a CFF/CFF2 font. A font with
+        /// <c>glyf</c> outlines has no <c>VORG</c>: OpenType defines its origin from the glyph's own
+        /// <c>vmtx</c> top side bearing instead (<c>vertOriginY = yMax + tsb</c>), which needs the vertical
+        /// metrics, so a TrueType face reports one exactly when it has <c>vhea</c>/<c>vmtx</c>. A variable
+        /// A variable font is excluded: its glyph bounds move with <c>gvar</c>, so it keeps the fallback
+        /// chain rather than reporting a static origin that would be wrong at an instance's own location.
         /// </summary>
-        public bool HasVerticalOrigin => FontFace.vorg != null && FontFace.glyf == null;
+        public bool HasVerticalOrigin =>
+            (FontFace.vorg != null && FontFace.glyf == null)
+            || (FontFace.glyf != null && HasVerticalMetrics && FontFace.Variations is null);
 
         /// <summary>
         /// A glyph's vertical origin, in font design units relative to its horizontal origin. X has no
         /// dedicated OpenType table (a conformant reader would consult <c>BASE</c>, which PeachPDF does
         /// not parse) - half the glyph's own advance width is the common implementation fallback, used
-        /// unconditionally since <c>VORG</c> only ever overrides Y. Y comes from <c>VORG</c> when
-        /// <see cref="HasVerticalOrigin"/> is true, else <c>vhea</c>'s own vertical typographic ascender
-        /// (the most on-topic value when present), else the font's general typographic ascender, falling
-        /// back further to one em when even that is unavailable.
+        /// unconditionally since <c>VORG</c> only ever overrides Y. Y comes from <c>VORG</c> when the font
+        /// has one; for TrueType outlines from the glyph's own ink top plus its <c>vmtx</c> top side
+        /// bearing; else <c>vhea</c>'s own vertical typographic ascender (the most on-topic value when
+        /// present), else the font's general typographic ascender, falling back further to one em when
+        /// even that is unavailable.
         /// </summary>
         public (int X, int Y) GlyphIndexToVerticalOrigin(int glyphIndex)
         {
             int originX = GlyphIndexToWidth(glyphIndex) / 2;
 
-            if (HasVerticalOrigin)
+            if (FontFace.vorg != null && FontFace.glyf == null)
             {
                 int origin = FontFace.vorg.VertOriginYFor(glyphIndex);
 
@@ -924,6 +927,24 @@ namespace PeachDrawing.Text.Internal.Fonts.OpenType
                     origin += Variations.FontVariations.Round(vvar.GetOriginDelta(glyphIndex, Variation.Normalized));
 
                 return (originX, origin);
+            }
+
+            // A TrueType face's vertical origin, straight from the OpenType definition: the top side
+            // bearing measures from the glyph's ink top to the origin, so originY = yMax + tsb. Without
+            // it a one-em cell's baseline lands on the cell's bottom edge and the per-cell clip shaves
+            // every descender (LXGW WenKai's ideographs in vertical text). A variable font keeps the
+            // fallback chain below: its glyph bounds move with gvar, and this reader has no variation-
+            // aware bounds here (a static face, the overwhelming case, is exact).
+            if (FontFace.Variations is null && FontFace.glyf != null && HasVerticalMetrics)
+            {
+                try
+                {
+                    return (originX, GlyphIndexToBoundsTop(glyphIndex) + GlyphIndexToTopSideBearing(glyphIndex));
+                }
+                catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException)
+                {
+                    // A damaged loca/glyf/vmtx must not make reading a font throw; fall back below.
+                }
             }
 
             VerticalHeaderTable vhea = FontFace.vhea;
@@ -935,6 +956,34 @@ namespace PeachDrawing.Text.Internal.Fonts.OpenType
                 return (originX, Adjust("hasc", os2.sTypoAscender));
 
             return (originX, FontFace.head.unitsPerEm);
+        }
+
+        /// <summary>The glyph's ink top (<c>glyf</c> header <c>yMax</c>), or 0 for a glyph with no outline.</summary>
+        private int GlyphIndexToBoundsTop(int glyphIndex)
+        {
+            ReadOnlySpan<byte> glyphData = FontFace.glyf.GetGlyphData(glyphIndex);
+
+            // numberOfContours(2) + xMin(2) + yMin(2) + xMax(2) + yMax(2); an empty glyph has no header.
+            return glyphData.Length >= 10 ? BigEndian.I16(glyphData, 8) : 0;
+        }
+
+        /// <summary>
+        /// The glyph's <c>vmtx</c> top side bearing. Glyphs past the long metrics share the last advance
+        /// height but carry their own bearing in the table's trailing array, as in <c>hmtx</c>'s own tail.
+        /// </summary>
+        private int GlyphIndexToTopSideBearing(int glyphIndex)
+        {
+            VerticalMetricsTable vmtx = FontFace.vmtx!;
+            int numMetrics = FontFace.vhea.numOfLongVerMetrics;
+
+            if (glyphIndex < numMetrics && glyphIndex < vmtx.Metrics.Length)
+                return vmtx.Metrics[glyphIndex].topSideBearing;
+
+            int index = glyphIndex - numMetrics;
+            if (vmtx.TopSideBearing is { } bearings && index >= 0 && index < bearings.Length)
+                return bearings[index];
+
+            return vmtx.Metrics.Length > 0 ? vmtx.Metrics[^1].topSideBearing : 0;
         }
     }
 }

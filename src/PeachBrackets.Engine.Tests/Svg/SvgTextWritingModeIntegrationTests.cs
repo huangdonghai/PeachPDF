@@ -304,7 +304,9 @@ namespace PeachPDF.Tests.Svg
                 await RenderContext.AddFont(vorgStream, "CjkVorgIgnoredTest");
             var withVorg = Render($"""<text x="10" y="50" font-size="20" font-family="CjkVorgIgnoredTest" writing-mode="vertical-rl" text-orientation="upright">{Upright}</text>""");
             var withVorgDraw = Assert.Single(withVorg.DrawStringCalls);
-            Assert.False(withVorgDraw.Font.HasVerticalOrigin);
+            // A TrueType face's origin, when it has one, comes from vmtx (vertOriginY = yMax + tsb) -
+            // never from the synthetic VORG here. The equality with the plain font below proves that.
+            Assert.True(withVorgDraw.Font.HasVerticalMetrics);
 
             await using (var plainStream = new MemoryStream(plainBytes))
                 await RenderContext.AddFont(plainStream, "CjkPlainForIgnoreCompare");

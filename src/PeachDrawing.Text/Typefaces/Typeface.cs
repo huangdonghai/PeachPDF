@@ -411,8 +411,9 @@ namespace PeachDrawing.Text
         public int GetVerticalAdvance(ushort glyph) => Face.Descriptor.GlyphIndexToVerticalAdvance(glyph);
 
         /// <summary>
-        /// Whether the font has a <c>VORG</c> table that is trusted. The specification allows one only in a font with CFF
-        /// outlines, so a TrueType-outline font never reports it, whatever tables it carries.
+        /// Whether the font can report a real per-glyph vertical origin: a trusted <c>VORG</c> table (CFF
+        /// outlines only), or, for a TrueType face, the origin OpenType derives from the glyph's own
+        /// <c>vmtx</c> top side bearing.
         /// </summary>
         public bool HasVerticalOrigin => Face.Descriptor.HasVerticalOrigin;
 
@@ -422,7 +423,7 @@ namespace PeachDrawing.Text
         /// </summary>
         /// <remarks>
         /// The horizontal coordinate is always half the glyph's horizontal advance; no font table supplies it. The vertical
-        /// one is the font's own <c>VORG</c> value when <see cref="HasVerticalOrigin"/> is <see langword="true"/>, and
+        /// one is <c>VORG</c>'s value when the font has one, a TrueType face's <c>yMax + vmtx</c> top side bearing, and
         /// otherwise the first of the <c>vhea</c> ascent, the <c>OS/2</c> typographic ascender and one em that the font has.
         /// </remarks>
         /// <param name="glyph">The glyph.</param>

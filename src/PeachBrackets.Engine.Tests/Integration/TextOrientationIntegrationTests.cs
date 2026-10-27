@@ -307,7 +307,10 @@ body {{ font-family: 'VorgOnTtf'; margin: 0 }}
             var withVorgContainer = await LayoutHtml(withVorgHtml);
             var withVorgBox = FindById(withVorgContainer.Root!, "w")!;
             var withVorgWordsBox = FindWordsBox(withVorgContainer.Root!, "w");
-            Assert.False(withVorgWordsBox.ActualFont.HasVerticalOrigin);
+            // A TrueType face's origin, when it has one, comes from vmtx (vertOriginY = yMax + tsb) -
+            // never from the synthetic VORG here. The byte-for-byte equality with the plain font below
+            // is what proves that VORG was ignored.
+            Assert.True(withVorgWordsBox.ActualFont.HasVerticalMetrics);
             var withVorgRecorder = new RecordingGraphics(new HtmlRenderContext());
             FragmentPaintHarness.PaintBox(withVorgContainer, withVorgBox, withVorgRecorder);
 
