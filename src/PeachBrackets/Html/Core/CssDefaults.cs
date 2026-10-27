@@ -84,6 +84,23 @@ namespace PeachBrackets.Html
             menu            { margin: 1.12em 0 }
             h5              { font-size: .83em; margin: 1.5em 0 }
             h6              { font-size: .75em; margin: 1.67em 0 }
+            /* Logical twins of the block margins above. A browser's UA declares these logically, so in
+               a vertical writing mode they are the horizontal gaps between columns; the physical
+               declarations above only ever reach the inline axis there. They are applied only where no
+               author margin owns the side (CssBox.ResolveLogicalProperties), and a revert in an author
+               rule elevates them to an author declaration, which is what `margin-block-end: revert`
+               means in Chrome: the author's physical margin on that side gives way to the UA value. */
+            body            { margin-block-start: 8px; margin-block-end: 8px }
+            h1              { margin-block-start: .67em; margin-block-end: .67em }
+            h2              { margin-block-start: .75em; margin-block-end: .75em }
+            h3              { margin-block-start: .83em; margin-block-end: .83em }
+            h4, p,
+            blockquote, ul,
+            fieldset, form,
+            ol, dl, dir,
+            menu            { margin-block-start: 1.12em; margin-block-end: 1.12em }
+            h5              { margin-block-start: 1.5em; margin-block-end: 1.5em }
+            h6              { margin-block-start: 1.67em; margin-block-end: 1.67em }
             h1, h2, h3, h4,
             h5, h6, b,
             strong          { font-weight: bolder; }

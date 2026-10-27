@@ -89,7 +89,26 @@ namespace PeachBrackets.Html.Utils
         /// <param name="value">the value to set</param>
         public static void SetPropertyValue(CssValueParser valueParser, CssBox cssBox, string propName, string value)
         {
-            CssPropertyRegistry.TrySet(valueParser, cssBox, propName, value);
+            if (!CssPropertyRegistry.TrySet(valueParser, cssBox, propName, value) || cssBox.IsApplyingUaRules)
+            {
+                return;
+            }
+
+            // Remember which physical margin sides an AUTHOR declaration touched: the UA's logical block
+            // margins may only take over a side the page left alone (see ResolveLogicalProperties).
+            switch (propName.ToLowerInvariant())
+            {
+                case "margin-top": cssBox.AuthorMarginSides |= CssBox.AuthorMarginTop; break;
+                case "margin-right": cssBox.AuthorMarginSides |= CssBox.AuthorMarginRight; break;
+                case "margin-bottom": cssBox.AuthorMarginSides |= CssBox.AuthorMarginBottom; break;
+                case "margin-left": cssBox.AuthorMarginSides |= CssBox.AuthorMarginLeft; break;
+                case "margin":
+                case "margin-block":
+                case "margin-inline":
+                    cssBox.AuthorMarginSides |= CssBox.AuthorMarginTop | CssBox.AuthorMarginRight |
+                                                CssBox.AuthorMarginBottom | CssBox.AuthorMarginLeft;
+                    break;
+            }
         }
 
         /// <summary>

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using PeachBrackets.Css;
 using PeachBrackets.Html.Parse;
@@ -21,10 +22,10 @@ namespace PeachBrackets.Html.Dom
     /// </summary>
     internal partial class CssBox
     {
-        internal string? MarginBlockStart { get => _rare is null ? default(string?) : _rare.MarginBlockStart; set { if (_rare is null) { if (EqualityComparer<string?>.Default.Equals(value, default(string?))) return; _rare = new BoxRareState(); } _rare.MarginBlockStart = value; } }
-        internal string? MarginBlockEnd { get => _rare is null ? default(string?) : _rare.MarginBlockEnd; set { if (_rare is null) { if (EqualityComparer<string?>.Default.Equals(value, default(string?))) return; _rare = new BoxRareState(); } _rare.MarginBlockEnd = value; } }
-        internal string? MarginInlineStart { get => _rare is null ? default(string?) : _rare.MarginInlineStart; set { if (_rare is null) { if (EqualityComparer<string?>.Default.Equals(value, default(string?))) return; _rare = new BoxRareState(); } _rare.MarginInlineStart = value; } }
-        internal string? MarginInlineEnd { get => _rare is null ? default(string?) : _rare.MarginInlineEnd; set { if (_rare is null) { if (EqualityComparer<string?>.Default.Equals(value, default(string?))) return; _rare = new BoxRareState(); } _rare.MarginInlineEnd = value; } }
+        internal string? MarginBlockStart { get => _rare is null ? default(string?) : _rare.MarginBlockStart; set { if (_rare is null) { if (EqualityComparer<string?>.Default.Equals(value, default(string?))) return; _rare = new BoxRareState(); } _rare.MarginBlockStart = value; _rare.MarginBlockStartFromUa = value is not null && IsApplyingUaRules; } }
+        internal string? MarginBlockEnd { get => _rare is null ? default(string?) : _rare.MarginBlockEnd; set { if (_rare is null) { if (EqualityComparer<string?>.Default.Equals(value, default(string?))) return; _rare = new BoxRareState(); } _rare.MarginBlockEnd = value; _rare.MarginBlockEndFromUa = value is not null && IsApplyingUaRules; } }
+        internal string? MarginInlineStart { get => _rare is null ? default(string?) : _rare.MarginInlineStart; set { if (_rare is null) { if (EqualityComparer<string?>.Default.Equals(value, default(string?))) return; _rare = new BoxRareState(); } _rare.MarginInlineStart = value; _rare.MarginInlineStartFromUa = value is not null && IsApplyingUaRules; } }
+        internal string? MarginInlineEnd { get => _rare is null ? default(string?) : _rare.MarginInlineEnd; set { if (_rare is null) { if (EqualityComparer<string?>.Default.Equals(value, default(string?))) return; _rare = new BoxRareState(); } _rare.MarginInlineEnd = value; _rare.MarginInlineEndFromUa = value is not null && IsApplyingUaRules; } }
 
         internal string? PaddingBlockStart { get => _rare is null ? default(string?) : _rare.PaddingBlockStart; set { if (_rare is null) { if (EqualityComparer<string?>.Default.Equals(value, default(string?))) return; _rare = new BoxRareState(); } _rare.PaddingBlockStart = value; } }
         internal string? PaddingBlockEnd { get => _rare is null ? default(string?) : _rare.PaddingBlockEnd; set { if (_rare is null) { if (EqualityComparer<string?>.Default.Equals(value, default(string?))) return; _rare = new BoxRareState(); } _rare.PaddingBlockEnd = value; } }
@@ -59,6 +60,14 @@ namespace PeachBrackets.Html.Dom
         /// written, physical or logical, should win) - a known, narrow simplification, see
         /// .claude/accepted-gaps/logical-and-physical-property-conflicts-favor-logical.md.
         /// </summary>
+        /// <summary>True while the UA cascade phase writes this box's style (see DomParser's phase 3).</summary>
+        internal bool IsApplyingUaRules { get; set; }
+
+        /// <summary>Bits of the physical margin sides an author declaration has written (see MarkAuthorMargin).</summary>
+        internal byte AuthorMarginSides { get; set; }
+
+        internal const byte AuthorMarginTop = 1, AuthorMarginRight = 2, AuthorMarginBottom = 4, AuthorMarginLeft = 8;
+
         internal void ResolveLogicalProperties()
         {
             if (MarginBlockStart is null && MarginBlockEnd is null && MarginInlineStart is null && MarginInlineEnd is null
@@ -75,15 +84,16 @@ namespace PeachBrackets.Html.Dom
             var writingMode = WritingMode.Value;
             var direction = Direction.Value;
 
+
             var blockStart = LogicalPropertyResolver.BlockStart(writingMode);
             var blockEnd = LogicalPropertyResolver.BlockEnd(writingMode);
             var inlineStart = LogicalPropertyResolver.InlineStart(writingMode, direction);
             var inlineEnd = LogicalPropertyResolver.InlineEnd(writingMode, direction);
 
-            if (MarginBlockStart is { } mbs) ApplyMargin(blockStart, mbs);
-            if (MarginBlockEnd is { } mbe) ApplyMargin(blockEnd, mbe);
-            if (MarginInlineStart is { } mis) ApplyMargin(inlineStart, mis);
-            if (MarginInlineEnd is { } mie) ApplyMargin(inlineEnd, mie);
+            if (MarginBlockStart is { } mbs && (!MarginBlockStartFromUa || !HasAuthorMargin(blockStart))) ApplyMargin(blockStart, mbs);
+            if (MarginBlockEnd is { } mbe && (!MarginBlockEndFromUa || !HasAuthorMargin(blockEnd))) ApplyMargin(blockEnd, mbe);
+            if (MarginInlineStart is { } mis && (!MarginInlineStartFromUa || !HasAuthorMargin(inlineStart))) ApplyMargin(inlineStart, mis);
+            if (MarginInlineEnd is { } mie && (!MarginInlineEndFromUa || !HasAuthorMargin(inlineEnd))) ApplyMargin(inlineEnd, mie);
 
             if (PaddingBlockStart is { } pbs) ApplyPadding(blockStart, pbs);
             if (PaddingBlockEnd is { } pbe) ApplyPadding(blockEnd, pbe);
@@ -108,6 +118,25 @@ namespace PeachBrackets.Html.Dom
             if (BorderInlineEndStyle is { } bies) ApplyBorderStyle(inlineEnd, bies);
             if (BorderInlineEndColor is { } biec) ApplyBorderColor(inlineEnd, biec);
         }
+
+        private bool MarginBlockStartFromUa => _rare?.MarginBlockStartFromUa ?? false;
+        private bool MarginBlockEndFromUa => _rare?.MarginBlockEndFromUa ?? false;
+        private bool MarginInlineStartFromUa => _rare?.MarginInlineStartFromUa ?? false;
+        private bool MarginInlineEndFromUa => _rare?.MarginInlineEndFromUa ?? false;
+
+        /// <summary>Whether an author declaration wrote the physical margin on <paramref name="side"/>.</summary>
+        /// <remarks>
+        /// The UA logical margins below are applied only where the page did not speak: an author `margin: 0`
+        /// is a declaration that beats the UA's spacing, exactly as in a browser, and checking the value
+        /// for zero could not tell that apart from the UA's own zero.
+        /// </remarks>
+        private bool HasAuthorMargin(PhysicalSide side) => (AuthorMarginSides & (side switch
+        {
+            PhysicalSide.Top => AuthorMarginTop,
+            PhysicalSide.Right => AuthorMarginRight,
+            PhysicalSide.Bottom => AuthorMarginBottom,
+            _ => AuthorMarginLeft,
+        })) != 0;
 
         private void ApplyMargin(PhysicalSide side, string value)
         {

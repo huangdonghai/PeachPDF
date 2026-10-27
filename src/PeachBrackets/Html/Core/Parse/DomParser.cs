@@ -1108,6 +1108,11 @@ namespace PeachBrackets.Html.Parse
         /// one of them (see <see cref="SiblingStyles"/>); null for a box cascaded on its own.</param>
         private static void CascadeApplyStyles(CssValueParser valueParser, CssBox box, CssData cssData, MediaQueryContext media, ContainerQuerySizes? containerSizes = null, List<CssBox>? displayContentsShells = null, SiblingStyles? siblings = null)
         {
+            // Declared before the inherited-only fast path below, which jumps to styleSettled past the
+            // sibling bookkeeping: both are read there.
+            SiblingStyle? sibling = null;
+            var captureSiblingStyle = false;
+
             // A text or anonymous box is not an element: no rule or attribute reaches it (CSS Cascade 4 §1.1/§7.2: it only inherits),
             // so what the steps below make of it is a function of the style it comes in with and its parent's. Every text box under
             // a parent of one style gets the same result, which the cascade of a long table was recomputing for each of them. A
@@ -1135,7 +1140,6 @@ namespace PeachBrackets.Html.Parse
             // contains, a box or mark that matching it would add), it adopts the one the first of them ended up with and skips the
             // matching and applying. The same things as for a text box are left out; so is foreign content, whose attribute names are
             // case-sensitive. The check is made for the first of them, once.
-            SiblingStyle? sibling = null;
             var verifyingSibling = false;
             var boxesBefore = 0;
             var shellsBefore = 0;
@@ -1303,7 +1307,9 @@ namespace PeachBrackets.Html.Parse
             // rather than a stricter, more formally origin-pure model.
 
             // 3. UA normal (no cascade layers in the UA sheet, so revert-layer target == revert target)
+            box.IsApplyingUaRules = true;
             AssignCssBlocks(valueParser, box, uaRules, importantPass: false, null, null, null, null, pendingVarProperties);
+            box.IsApplyingUaRules = false;
             // A keyframe's `revert` rolls back to this same UA-level state (the animation origin counts as author
             // origin for revert, CSS Cascade 5 §7.3.4), so it asks for the snapshot too.
             var needsUaSnapshot = authorUsesRevert || box.HtmlContainer?.KeyframesUseRevert == true;
@@ -1429,7 +1435,10 @@ namespace PeachBrackets.Html.Parse
                 && (displayContentsShells?.Count ?? 0) == shellsBefore && box.MatchesFirstLetterSelector == firstLetterBefore
                 && box.CustomProperties is not { Count: > 0 })
             {
-                sibling.Style = box.ComputedStyle;
+                // Captured after ResolveLogicalProperties below: the logical pass rewrites physical edges
+                // into the computed style (copy-on-write), and a sibling adopting the pre-pass snapshot
+                // would inherit the unresolved margins and lose the box-local logical declarations.
+                captureSiblingStyle = true;
             }
 
         styleSettled:
@@ -1443,6 +1452,11 @@ namespace PeachBrackets.Html.Parse
             // longhands cascaded onto this box (CssBox.LogicalProperties.cs) to their physical edge, now
             // that this box's own Direction/WritingMode are fully resolved.
             box.ResolveLogicalProperties();
+
+            if (captureSiblingStyle)
+            {
+                sibling!.Style = box.ComputedStyle;
+            }
 
             if (!box.FirstLineProcessed)
             {
@@ -2339,6 +2353,13 @@ namespace PeachBrackets.Html.Parse
             return colorIsImportant;
         }
 
+        /// <summary>Whether <paramref name="name"/> is one of the four logical margin longhands.</summary>
+        private static bool IsLogicalMargin(string name) =>
+            name.Equals("margin-block-start", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("margin-block-end", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("margin-inline-start", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("margin-inline-end", StringComparison.OrdinalIgnoreCase);
+
         /// <summary>
         /// Checks whether any declaration in the given rules literally uses the revert/revert-layer keyword,
         /// so the (relatively expensive) property snapshot used as their revert target only needs to be
@@ -2435,6 +2456,10 @@ namespace PeachBrackets.Html.Parse
         {
             foreach (var prop in stylesheetRule.Style)
             {
+                if (prop.Name.Equals("margin-block-end", StringComparison.OrdinalIgnoreCase))
+                {
+                }
+
                 if (prop.IsImportant != importantPass)
                     continue;
 
@@ -2459,14 +2484,19 @@ namespace PeachBrackets.Html.Parse
                         => CssUtils.GetPropertyValue(box.ParentBox, prop.Name),
                     Keywords.Unset
                         => CssDefaults.GetInitialValue(prop.Name),
+                    // A logical margin's revert target is the UA rule for that side; when the snapshot
+                    // does not carry it (the engine's UA logical margins live only in the active slot),
+                    // the value already in the slot is exactly that UA declaration, and re-applying it
+                    // here re-tags it as an author declaration so it wins over the author's physical
+                    // margin on the same side - Chrome's `margin-block-end: revert`.
                     Keywords.Revert
-                        => revertTarget is not null && revertTarget.TryGetValue(prop.Name, out var rv)
+                        => revertTarget is not null && revertTarget.TryGetValue(prop.Name, out var rv) && rv is not null
                             ? rv
-                            : CssDefaults.GetInitialValue(prop.Name),
+                            : IsLogicalMargin(prop.Name) ? CssUtils.GetPropertyValue(box, prop.Name) : CssDefaults.GetInitialValue(prop.Name),
                     Keywords.RevertLayer
-                        => revertLayerTarget is not null && revertLayerTarget.TryGetValue(prop.Name, out var rvl)
+                        => revertLayerTarget is not null && revertLayerTarget.TryGetValue(prop.Name, out var rvl) && rvl is not null
                             ? rvl
-                            : CssDefaults.GetInitialValue(prop.Name),
+                            : IsLogicalMargin(prop.Name) ? CssUtils.GetPropertyValue(box, prop.Name) : CssDefaults.GetInitialValue(prop.Name),
                     _ => VendorValueAliases.Normalize(prop.Name, prop.Value)
                 };
 

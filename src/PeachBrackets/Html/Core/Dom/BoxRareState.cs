@@ -125,9 +125,13 @@ namespace PeachBrackets.Html.Dom
         internal List<CssBox>? DisplayContentsLiftedChildren;
         internal List<CssBox>? DisplayContentsAncestors;
         internal CssBox? OriginatingBox;
+        internal bool MarginBlockStartFromUa;
         internal string? MarginBlockStart;
+        internal bool MarginBlockEndFromUa;
         internal string? MarginBlockEnd;
+        internal bool MarginInlineStartFromUa;
         internal string? MarginInlineStart;
+        internal bool MarginInlineEndFromUa;
         internal string? MarginInlineEnd;
         internal string? PaddingBlockStart;
         internal string? PaddingBlockEnd;
