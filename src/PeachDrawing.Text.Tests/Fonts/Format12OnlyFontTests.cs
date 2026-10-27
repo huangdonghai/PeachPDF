@@ -18,8 +18,12 @@ namespace PeachDrawing.Text.Tests.Fonts
     {
         private const int Astral = 0x1F600;
 
-        /// <summary>The bundled font with a cmap that has one format-12 subtable mapping A to Z, a to z and one astral codepoint.</summary>
-        private static byte[] Build(byte[] source, out Typeface original, int platform = 3)
+        /// <summary>
+        /// The bundled font with a cmap that has one format-12 subtable mapping A to Z, a to z and one astral
+        /// codepoint - optionally preceded by a stub format-4 subtable (the two segments every format-4 subtable
+        /// needs and nothing else), the shape some CJK fonts ship.
+        /// </summary>
+        internal static byte[] Build(byte[] source, out Typeface original, int platform = 3, bool stubFormat4 = false)
         {
             original = TypefaceFixtures.FromBytes(source);
 
@@ -43,16 +47,51 @@ namespace PeachDrawing.Text.Tests.Fonts
                 BinaryPrimitives.WriteUInt32BigEndian(group[8..], (uint)groups[i].Glyph);
             }
 
-            var cmap = new byte[12 + subtable.Length];
-            BinaryPrimitives.WriteUInt16BigEndian(cmap.AsSpan(2), 1);   // numTables
-            BinaryPrimitives.WriteUInt16BigEndian(cmap.AsSpan(4), (ushort)platform);   // platform: Windows unless a test says otherwise
-            BinaryPrimitives.WriteUInt16BigEndian(cmap.AsSpan(6), 10);  // encoding: Unicode full repertoire
-            BinaryPrimitives.WriteUInt32BigEndian(cmap.AsSpan(8), 12);  // subtable offset
-            subtable.CopyTo(cmap.AsSpan(12));
+            var stub = stubFormat4 ? BuildStubFormat4() : null;
+            int header = 4 + 8 * (stub is null ? 1 : 2);
+            var cmap = new byte[header + (stub?.Length ?? 0) + subtable.Length];
+            BinaryPrimitives.WriteUInt16BigEndian(cmap.AsSpan(2), (ushort)(stub is null ? 1 : 2));   // numTables
+
+            int record = 4;
+            if (stub is not null)
+            {
+                BinaryPrimitives.WriteUInt16BigEndian(cmap.AsSpan(record), 3);       // platform: Windows
+                BinaryPrimitives.WriteUInt16BigEndian(cmap.AsSpan(record + 2), 1);   // encoding: Unicode BMP
+                BinaryPrimitives.WriteUInt32BigEndian(cmap.AsSpan(record + 4), (uint)header);
+                stub.CopyTo(cmap.AsSpan(header));
+                record += 8;
+            }
+
+            BinaryPrimitives.WriteUInt16BigEndian(cmap.AsSpan(record), (ushort)platform);   // platform: Windows unless a test says otherwise
+            BinaryPrimitives.WriteUInt16BigEndian(cmap.AsSpan(record + 2), 10);             // encoding: Unicode full repertoire
+            BinaryPrimitives.WriteUInt32BigEndian(cmap.AsSpan(record + 4), (uint)(header + (stub?.Length ?? 0)));
+            subtable.CopyTo(cmap.AsSpan(header + (stub?.Length ?? 0)));
 
             var tables = SyntheticUvsFont.ReadTables(source, out var sfntVersion);
             tables["cmap"] = cmap;
             return SyntheticUvsFont.WriteTables(tables, sfntVersion);
+        }
+
+        /// <summary>
+        /// A format-4 subtable with the minimum two segments - 0..0 and the FFFF terminator - mapping no
+        /// character anyone asks for, the stub LXGW WenKai Light ships beside its real format-12 mapping.
+        /// </summary>
+        private static byte[] BuildStubFormat4()
+        {
+            var stub = new byte[32];
+            BinaryPrimitives.WriteUInt16BigEndian(stub, 4);              // format
+            BinaryPrimitives.WriteUInt16BigEndian(stub.AsSpan(2), 32);   // length
+            BinaryPrimitives.WriteUInt16BigEndian(stub.AsSpan(6), 4);    // segCountX2
+            BinaryPrimitives.WriteUInt16BigEndian(stub.AsSpan(8), 4);    // searchRange
+            BinaryPrimitives.WriteUInt16BigEndian(stub.AsSpan(10), 1);   // entrySelector
+            BinaryPrimitives.WriteUInt16BigEndian(stub.AsSpan(14), 0x0000);   // endCode[0]
+            BinaryPrimitives.WriteUInt16BigEndian(stub.AsSpan(16), 0xFFFF);   // endCode[1]
+            BinaryPrimitives.WriteUInt16BigEndian(stub.AsSpan(20), 0x0000);   // startCode[0]
+            BinaryPrimitives.WriteUInt16BigEndian(stub.AsSpan(22), 0xFFFF);   // startCode[1]
+            BinaryPrimitives.WriteInt16BigEndian(stub.AsSpan(24), 0);         // idDelta[0]
+            BinaryPrimitives.WriteInt16BigEndian(stub.AsSpan(26), 1);         // idDelta[1]: terminator maps to .notdef
+            // idRangeOffset[0..1] stay 0: every segment maps by delta alone, so the stub covers no real character.
+            return stub;
         }
 
         [Fact]

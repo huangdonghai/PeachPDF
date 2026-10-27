@@ -737,41 +737,38 @@ namespace PeachDrawing.Text.Internal.Fonts.OpenType
             // without format-12 has no astral mapping, so it resolves to the missing glyph.
             //
             // A font whose only subtable is format 12 has no format-4 one; its format-12 groups cover the
-            // BMP as well, so they answer for every codepoint.
-            CMap4? cmap4 = FontFace.cmap.cmap4;
-            if (value > 0xFFFF || cmap4 is null)
-                return FontFace.cmap.cmap12?.MapCodeToGlyph(value) ?? 0;
+            // BMP as well, so they answer for every codepoint. The same goes for a font whose format-4
+            // subtable is a stub that maps almost nothing while its real Unicode mapping lives in format
+            // 12 - some CJK fonts ship exactly that - so a format-4 miss falls through to format 12
+            // rather than answering the missing glyph.
+            int glyph = value <= 0xFFFF && FontFace.cmap.cmap4 is { } cmap4 ? MapFormat4(cmap4, value) : 0;
+            return glyph != 0 ? glyph : FontFace.cmap.cmap12?.MapCodeToGlyph(value) ?? 0;
+        }
 
-            try
+        private static int MapFormat4(CMap4 cmap4, int value)
+        {
+            int segCount = cmap4.segCountX2 / 2;
+            int seg;
+            for (seg = 0; seg < segCount; seg++)
             {
-                int segCount = cmap4.segCountX2 / 2;
-                int seg;
-                for (seg = 0; seg < segCount; seg++)
-                {
-                    if (value <= cmap4.endCount[seg])
-                        break;
-                }
-                Debug.Assert(seg < segCount);
-
-                if (value < cmap4.startCount[seg])
-                    return 0;
-
-                if (cmap4.idRangeOffs[seg] == 0)
-                    return (value + cmap4.idDelta[seg]) & 0xFFFF;
-
-                int idx = cmap4.idRangeOffs[seg] / 2 + (value - cmap4.startCount[seg]) - (segCount - seg);
-                Debug.Assert(idx >= 0 && idx < cmap4.glyphCount);
-
-                if (cmap4.glyphIdArray[idx] == 0)
-                    return 0;
-
-                return (cmap4.glyphIdArray[idx] + cmap4.idDelta[seg]) & 0xFFFF;
+                if (value <= cmap4.endCount[seg])
+                    break;
             }
-            catch
-            {
-                GetType();
-                throw;
-            }
+            Debug.Assert(seg < segCount);
+
+            if (value < cmap4.startCount[seg])
+                return 0;
+
+            if (cmap4.idRangeOffs[seg] == 0)
+                return (value + cmap4.idDelta[seg]) & 0xFFFF;
+
+            int idx = cmap4.idRangeOffs[seg] / 2 + (value - cmap4.startCount[seg]) - (segCount - seg);
+            Debug.Assert(idx >= 0 && idx < cmap4.glyphCount);
+
+            if (cmap4.glyphIdArray[idx] == 0)
+                return 0;
+
+            return (cmap4.glyphIdArray[idx] + cmap4.idDelta[seg]) & 0xFFFF;
         }
 
         /// <summary>
