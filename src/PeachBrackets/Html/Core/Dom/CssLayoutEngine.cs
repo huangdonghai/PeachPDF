@@ -966,9 +966,22 @@ namespace PeachBrackets.Html.Dom
 
             var (columnStartInset, effectiveWrapLimit, columnTopInset, columnBottomInset) =
                 ComputeColumnInlineSpan(blockBox, frame, clientTop, wrapLimit, 0, ProspectiveColumnExtent(0), placedFloats);
-            inlineOffset = columnStartInset;
             line.VerticalTopInset = columnTopInset;
             line.VerticalBottomInset = columnBottomInset;
+
+            // Where the column's own text may start: after the float inset and, for the columns
+            // text-indent selects (CSS Text 3 §3 - the block's first line, every line after a forced break
+            // under `each-line`, the inverse under `hanging`), after the indent as well. This is the
+            // vertical counterpart of FlowBox's own start cursor.
+            double columnTextStart = 0;
+            void ResetColumnStart()
+            {
+                columnTextStart = columnStartInset + GetLineTextIndent(blockBox,
+                    ReferenceEquals(line, blockBox.LineBoxes[0]), line.FollowsForcedBreak);
+                inlineOffset = columnTextStart;
+            }
+
+            ResetColumnStart();
 
             // Whether blockBox's own white-space permits a column break anywhere in its content at all -
             // FlowBox's own `blockBoxPermitsWrap` counterpart (issue #841). Read once: if blockBox itself
@@ -980,7 +993,7 @@ namespace PeachBrackets.Html.Dom
 
             var currentWordIndex = 0;
 
-            async ValueTask StartNewLine()
+            async ValueTask StartNewLine(bool followsForcedBreak = false)
             {
                 // The column about to close is being abandoned for a new one - fold whether it ended in a
                 // hyphen into the running consecutive-hyphenated-columns count before that state resets.
@@ -999,11 +1012,12 @@ namespace PeachBrackets.Html.Dom
                 await PlaceFloatsUpTo(currentWordIndex, blockOffset);
 
                 line = new CssLineBox(blockBox);
+                line.FollowsForcedBreak = followsForcedBreak;
                 (columnStartInset, effectiveWrapLimit, columnTopInset, columnBottomInset) =
                     ComputeColumnInlineSpan(blockBox, frame, clientTop, wrapLimit, blockOffset, ProspectiveColumnExtent(currentWordIndex), placedFloats);
-                inlineOffset = columnStartInset;
                 line.VerticalTopInset = columnTopInset;
                 line.VerticalBottomInset = columnBottomInset;
+                ResetColumnStart();
             }
 
             var pendingWordSeparator = false;
@@ -1023,9 +1037,9 @@ namespace PeachBrackets.Html.Dom
                 {
                     (columnStartInset, effectiveWrapLimit, columnTopInset, columnBottomInset) =
                         ComputeColumnInlineSpan(blockBox, frame, clientTop, wrapLimit, blockOffset, ProspectiveColumnExtent(currentWordIndex), placedFloats);
-                    inlineOffset = columnStartInset;
                     line.VerticalTopInset = columnTopInset;
                     line.VerticalBottomInset = columnBottomInset;
+                    ResetColumnStart();
                 }
 
                 var word = words[i];
@@ -1033,9 +1047,10 @@ namespace PeachBrackets.Html.Dom
                 if (word.IsLineBreak)
                 {
                     // See CssLineBox.PrecedesForcedBreak: the column this break closes is the last one of
-                    // its paragraph, so text-align-last governs it (css-text-3 §6.1/§6.3).
+                    // its paragraph, so text-align-last governs it (css-text-3 §6.1/§6.3). The column the
+                    // break opens follows a forced break, which text-indent: each-line looks for.
                     line.PrecedesForcedBreak = true;
-                    await StartNewLine();
+                    await StartNewLine(followsForcedBreak: true);
                     continue;
                 }
 
@@ -1115,7 +1130,7 @@ namespace PeachBrackets.Html.Dom
                     currentColumnHyphenated = true;
                 }
 
-                if (wordDoesNotFit && (inlineOffset <= columnStartInset || !hasOrdinaryWrapBefore) &&
+                if (wordDoesNotFit && (inlineOffset <= columnTextStart || !hasOrdinaryWrapBefore) &&
                     TryOverflowWrapWord(g, word, effectiveWrapLimit - inlineOffset, out var overflowPrefix,
                         out var overflowSuffix))
                 {
@@ -1142,7 +1157,7 @@ namespace PeachBrackets.Html.Dom
                                           && (i == 0 || words[i - 1].OwnerBox != word.OwnerBox);
 
                 var wrapsWholeNoWrapRun = false;
-                if (entersNewNoWrapRun && inlineOffset > columnStartInset)
+                if (entersNewNoWrapRun && inlineOffset > columnTextStart)
                 {
                     // The run's own total *inline-axis* (along-the-column) extent - NaturalWordSize's
                     // Width, the same quantity wordAdvance above is built from, not Height (the cross-axis
@@ -1162,7 +1177,7 @@ namespace PeachBrackets.Html.Dom
                 // guard FlowBox's own wrap check already applies. inlineOffset > 0 (a real word already
                 // placed in this column) avoids wrapping a column that is still empty - the same
                 // unavoidable-overflow fallback FlowBox's own first-word-of-a-line case gets.
-                var startedNewLine = inlineOffset > columnStartInset
+                var startedNewLine = inlineOffset > columnTextStart
                     && ((hasOrdinaryWrapBefore && wordDoesNotFit)
                         || (!hasOrdinaryWrapBefore && wordDoesNotFit
                             && isGraphemeBoundary && AllowsOverflowWrapAtBoundary(previousWord, word))
@@ -1170,8 +1185,8 @@ namespace PeachBrackets.Html.Dom
                 if (startedNewLine)
                     await StartNewLine();
 
-                if (startedNewLine && naturalWidth > effectiveWrapLimit - columnStartInset &&
-                    TryOverflowWrapWord(g, word, effectiveWrapLimit - columnStartInset, out overflowPrefix,
+                if (startedNewLine && naturalWidth > effectiveWrapLimit - columnTextStart &&
+                    TryOverflowWrapWord(g, word, effectiveWrapLimit - columnTextStart, out overflowPrefix,
                         out overflowSuffix))
                 {
                     ReplaceCollectedWordWithOverflowWrapSplit(words, i, word, overflowPrefix!, overflowSuffix!);
@@ -1351,9 +1366,17 @@ namespace PeachBrackets.Html.Dom
                 // reflects positions within that span - it never moves the span's own edges.
                 //
                 // The column's own span, not the box's: a float pinned to the physical top or bottom took that
-                // end of it (VerticalTopInset/VerticalBottomInset), and alignment is within what is left.
+                // end of it (VerticalTopInset/VerticalBottomInset), and alignment is within what is left. The
+                // indent narrows the span at the inline-start end too (CSS Text 3 §3: the first line, plus
+                // the lines `each-line`/`hanging` select) - the flow already placed the words after it, and
+                // alignment re-anchoring them without this would center or justify the indent away.
                 var spanTop = clientTop + lineBox.VerticalTopInset;
                 var spanBottom = clientBottom - lineBox.VerticalBottomInset;
+                var indent = GetLineTextIndent(blockBox,
+                    ReferenceEquals(lineBox, blockBox.LineBoxes[0]), lineBox.FollowsForcedBreak);
+                if (finalFrame.InlineStartIsBottom) spanBottom -= indent;
+                else spanTop += indent;
+
                 ApplyVerticalTextAlignment(lineBox, finalFrame, isLastColumn, spanTop, spanBottom);
                 ApplyVerticalBidiReordering(lineBox, finalFrame, spanTop, spanBottom);
 
@@ -8121,9 +8144,10 @@ namespace PeachBrackets.Html.Dom
         /// (the block's last, or one a forced break closed) and one with nothing to expand at have both
         /// already been routed to <c>text-align-last</c> instead, exactly as in
         /// <see cref="ApplyHorizontalAlignment"/>.
-        /// <c>text-indent</c> is not implemented for vertical content at all yet, so no indent is applied
-        /// here (compare <see cref="ApplyJustifyAlignment"/>'s own <c>GetLineTextIndent</c> call). See
-        /// <see cref="ApplyVerticalFlushAlignment"/>'s own remarks for why the edges are parameters.
+        /// <c>text-indent</c> is already excluded from the span these edges bound (see
+        /// <see cref="FinalizeVerticalLineBoxes"/>), the same way <see cref="ApplyJustifyAlignment"/>
+        /// subtracts it from the line's own end edge.
+        /// <see cref="ApplyVerticalFlushAlignment"/>'s own remarks explain why the edges are parameters.
         /// </summary>
         /// <remarks>
         /// Anchors the column at its own inline-start edge before distributing, which horizontal has no

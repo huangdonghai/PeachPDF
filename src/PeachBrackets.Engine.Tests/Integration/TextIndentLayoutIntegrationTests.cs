@@ -258,6 +258,99 @@ namespace PeachPDF.Tests.Integration
         }
 
         [Fact]
+        public async Task VerticalRl_IndentsTheFirstColumnFromThePhysicalTop()
+        {
+            // The inline axis is physical Y under vertical-rl, so the indent pushes the first column's text
+            // down from the box's own top edge - the counterpart of the horizontal first-line indent.
+            var (root, _) = await LayoutHarness.LayoutAsync(
+                LayoutHarness.Wrap(
+                    "<p id='p' style='margin:0;font-size:10pt;height:100pt;writing-mode:vertical-rl;text-indent:40pt'>" +
+                    "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十</p>"));
+
+            var p = LayoutHarness.FindById(root, "p")!;
+            Assert.True(p.LineBoxes.Count >= 2, $"expected the paragraph to wrap onto at least two columns, got {p.LineBoxes.Count}");
+
+            Assert.Equal(p.ClientTop + 40, p.LineBoxes[0].Words.Min(w => w.Top), 2);
+            for (var i = 1; i < p.LineBoxes.Count; i++)
+            {
+                Assert.Equal(p.ClientTop, p.LineBoxes[i].Words.Min(w => w.Top), 2);
+            }
+        }
+
+        [Fact]
+        public async Task VerticalRl_Hanging_IndentsEveryColumnExceptTheFirst()
+        {
+            var (root, _) = await LayoutHarness.LayoutAsync(
+                LayoutHarness.Wrap(
+                    "<p id='p' style='margin:0;font-size:10pt;height:100pt;writing-mode:vertical-rl;text-indent:40pt hanging'>" +
+                    "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十</p>"));
+
+            var p = LayoutHarness.FindById(root, "p")!;
+            Assert.True(p.LineBoxes.Count >= 2, $"expected the paragraph to wrap onto at least two columns, got {p.LineBoxes.Count}");
+
+            Assert.Equal(p.ClientTop, p.LineBoxes[0].Words.Min(w => w.Top), 2);
+            for (var i = 1; i < p.LineBoxes.Count; i++)
+            {
+                Assert.Equal(p.ClientTop + 40, p.LineBoxes[i].Words.Min(w => w.Top), 2);
+            }
+        }
+
+        [Fact]
+        public async Task VerticalRl_EachLine_IndentsTheFirstColumnAndEveryColumnAfterAForcedBreak()
+        {
+            var (root, _) = await LayoutHarness.LayoutAsync(
+                LayoutHarness.Wrap(
+                    "<p id='p' style='margin:0;font-size:10pt;height:60pt;writing-mode:vertical-rl;text-indent:40pt each-line'>" +
+                    "一二<br>三四五六七八九十一二三四五六七八九十一二三四<br>五六</p>"));
+
+            var p = LayoutHarness.FindById(root, "p")!;
+            var columns = p.LineBoxes;
+            Assert.True(columns.Count > 4, $"expected the long line to wrap onto continuation columns, got {columns.Count} columns");
+
+            foreach (var column in columns)
+            {
+                var isFirstColumn = column == columns[0];
+                var expectedTop = isFirstColumn || column.FollowsForcedBreak ? p.ClientTop + 40 : p.ClientTop;
+                Assert.Equal(expectedTop, column.Words.Min(w => w.Top), 2);
+            }
+        }
+
+        [Fact]
+        public async Task VerticalRl_Justify_KeepsTheIndentBeforeSpreadingTheColumn()
+        {
+            // The book renders its body with text-align: justify, which re-anchors every column against the
+            // box's own edges - the indent has to narrow the span it distributes within, not be spread away.
+            var (root, _) = await LayoutHarness.LayoutAsync(
+                LayoutHarness.Wrap(
+                    "<p id='p' style='margin:0;font-size:10pt;height:100pt;writing-mode:vertical-rl;text-align:justify;text-indent:40pt'>" +
+                    "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十</p>"));
+
+            var p = LayoutHarness.FindById(root, "p")!;
+            Assert.True(p.LineBoxes.Count >= 2, $"expected the paragraph to wrap onto at least two columns, got {p.LineBoxes.Count}");
+
+            var firstColumn = p.LineBoxes[0];
+            Assert.Equal(p.ClientTop + 40, firstColumn.Words.Min(w => w.Top), 2);
+            Assert.Equal(p.ClientBottom, firstColumn.Words.Max(w => w.Bottom), 2);
+        }
+
+        [Fact]
+        public async Task VerticalRl_NegativeIndent_StartsTheFirstColumnBeforeTheInlineStartEdge()
+        {
+            // The book's .note class outdents its first line by -1em; a negative indent hangs the first
+            // column out past the box's own inline-start edge, exactly as it does horizontally.
+            var (root, _) = await LayoutHarness.LayoutAsync(
+                LayoutHarness.Wrap(
+                    "<p id='p' style='margin:0;font-size:10pt;height:100pt;writing-mode:vertical-rl;text-indent:-1em'>" +
+                    "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十</p>"));
+
+            var p = LayoutHarness.FindById(root, "p")!;
+            Assert.True(p.LineBoxes.Count >= 2, $"expected the paragraph to wrap onto at least two columns, got {p.LineBoxes.Count}");
+
+            Assert.Equal(p.ClientTop - 10, p.LineBoxes[0].Words.Min(w => w.Top), 2);
+            Assert.Equal(p.ClientTop, p.LineBoxes[1].Words.Min(w => w.Top), 2);
+        }
+
+        [Fact]
         public async Task Rtl_NoWrapInlineBox_RespectsTheNarrowedWrapBoundaryToo()
         {
             // FlowBox's RTL wrap-boundary narrowing (the mechanism that reserves the indent's space
