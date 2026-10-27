@@ -1109,9 +1109,14 @@ namespace PeachBrackets.Html.Parse
         private static void CascadeApplyStyles(CssValueParser valueParser, CssBox box, CssData cssData, MediaQueryContext media, ContainerQuerySizes? containerSizes = null, List<CssBox>? displayContentsShells = null, SiblingStyles? siblings = null)
         {
             // Declared before the inherited-only fast path below, which jumps to styleSettled past the
-            // sibling bookkeeping: both are read there.
+            // sibling bookkeeping: they are read there (definite assignment requires the jump not to skip
+            // their initializers).
             SiblingStyle? sibling = null;
             var captureSiblingStyle = false;
+            var verifyingSibling = false;
+            var boxesBefore = 0;
+            var shellsBefore = 0;
+            var firstLetterBefore = false;
 
             // A text or anonymous box is not an element: no rule or attribute reaches it (CSS Cascade 4 §1.1/§7.2: it only inherits),
             // so what the steps below make of it is a function of the style it comes in with and its parent's. Every text box under
@@ -1140,10 +1145,6 @@ namespace PeachBrackets.Html.Parse
             // contains, a box or mark that matching it would add), it adopts the one the first of them ended up with and skips the
             // matching and applying. The same things as for a text box are left out; so is foreign content, whose attribute names are
             // case-sensitive. The check is made for the first of them, once.
-            var verifyingSibling = false;
-            var boxesBefore = 0;
-            var shellsBefore = 0;
-            var firstLetterBefore = false;
             if (!inheritedOnly && siblings is not null && box.HtmlTag is { } elementTag && !box.IsWithinForeignContent
                 && !DisableSiblingStyleSharing.Value
                 && box.ParentBox is { } elementParent && elementParent.ComputedStyle.CustomProperties is not { Count: > 0 }
@@ -1414,6 +1415,24 @@ namespace PeachBrackets.Html.Parse
             // Correct current color
             CssUtils.ApplyCurrentColor(box, valueParser);
 
+            if (sibling is { Eligible: true, Style: null } && box.Boxes.Count == boxesBefore
+                && (displayContentsShells?.Count ?? 0) == shellsBefore && box.MatchesFirstLetterSelector == firstLetterBefore
+                && box.CustomProperties is not { Count: > 0 })
+            {
+                // Captured after ResolveLogicalProperties below: the logical pass rewrites physical edges
+                // into the computed style (copy-on-write), and a sibling adopting the pre-pass snapshot
+                // would inherit the unresolved margins and lose the box-local logical declarations.
+                captureSiblingStyle = true;
+            }
+
+        styleSettled:
+            // CSS Logical Properties: resolve any of the 24 logical margin/padding/inset/border
+            // longhands cascaded onto this box (CssBox.LogicalProperties.cs) to their physical edge, now
+            // that this box's own Direction/WritingMode are fully resolved - including the UA's logical
+            // margins, which reach the computed style only through this pass. Before the shared-style
+            // comparison below, which must see the same physical edges the shared style was captured with.
+            box.ResolveLogicalProperties();
+
             if (verifyingInheritedOnly)
             {
                 if (!StylesEquivalent(sharedStyle, box))
@@ -1431,27 +1450,12 @@ namespace PeachBrackets.Html.Parse
                     throw new InvalidOperationException("A style shared between siblings differs from the one the cascade made: " + $" boxes {boxesBefore}->{box.Boxes.Count} shells {shellsBefore}->{displayContentsShells?.Count ?? 0} firstLetter {firstLetterBefore}->{box.MatchesFirstLetterSelector} tag {box.HtmlTag?.Name}");
                 VerifySharedStyles.Value!.VerifiedElements++;
             }
-            else if (sibling is { Eligible: true, Style: null } && box.Boxes.Count == boxesBefore
-                && (displayContentsShells?.Count ?? 0) == shellsBefore && box.MatchesFirstLetterSelector == firstLetterBefore
-                && box.CustomProperties is not { Count: > 0 })
-            {
-                // Captured after ResolveLogicalProperties below: the logical pass rewrites physical edges
-                // into the computed style (copy-on-write), and a sibling adopting the pre-pass snapshot
-                // would inherit the unresolved margins and lose the box-local logical declarations.
-                captureSiblingStyle = true;
-            }
 
-        styleSettled:
             if (!box.PlaceholderStyleProcessed)
             {
                 box.PlaceholderStyleProcessed = true;
                 ResolvePlaceholderStyle(valueParser, box, cssData, media, containerSizes);
             }
-
-            // CSS Logical Properties: resolve any of the 24 logical margin/padding/inset/border
-            // longhands cascaded onto this box (CssBox.LogicalProperties.cs) to their physical edge, now
-            // that this box's own Direction/WritingMode are fully resolved.
-            box.ResolveLogicalProperties();
 
             if (captureSiblingStyle)
             {
@@ -2489,14 +2493,21 @@ namespace PeachBrackets.Html.Parse
                     // the value already in the slot is exactly that UA declaration, and re-applying it
                     // here re-tags it as an author declaration so it wins over the author's physical
                     // margin on the same side - Chrome's `margin-block-end: revert`.
+                    // A physical margin's revert target is the UA rule for that side. The UA spelled its
+                    // paragraph/heading defaults logically, so those never reach the physical snapshot:
+                    // when the UA declared a logical margin for this side, that is what revert reveals,
+                    // exactly as a browser's `p { margin-top: revert }` falls back to its UA
+                    // `margin-block-start`.
                     Keywords.Revert
-                        => revertTarget is not null && revertTarget.TryGetValue(prop.Name, out var rv) && rv is not null
-                            ? rv
-                            : IsLogicalMargin(prop.Name) ? CssUtils.GetPropertyValue(box, prop.Name) ?? box.UaLogicalMargin(prop.Name) : CssDefaults.GetInitialValue(prop.Name),
+                        => box.UaMarginForPhysical(prop.Name)
+                            ?? (revertTarget is not null && revertTarget.TryGetValue(prop.Name, out var rv) && rv is not null
+                                ? rv
+                                : IsLogicalMargin(prop.Name) ? CssUtils.GetPropertyValue(box, prop.Name) ?? box.UaLogicalMargin(prop.Name) : CssDefaults.GetInitialValue(prop.Name)),
                     Keywords.RevertLayer
-                        => revertLayerTarget is not null && revertLayerTarget.TryGetValue(prop.Name, out var rvl) && rvl is not null
-                            ? rvl
-                            : IsLogicalMargin(prop.Name) ? CssUtils.GetPropertyValue(box, prop.Name) ?? box.UaLogicalMargin(prop.Name) : CssDefaults.GetInitialValue(prop.Name),
+                        => box.UaMarginForPhysical(prop.Name)
+                            ?? (revertLayerTarget is not null && revertLayerTarget.TryGetValue(prop.Name, out var rvl) && rvl is not null
+                                ? rvl
+                                : IsLogicalMargin(prop.Name) ? CssUtils.GetPropertyValue(box, prop.Name) ?? box.UaLogicalMargin(prop.Name) : CssDefaults.GetInitialValue(prop.Name)),
                     _ => VendorValueAliases.Normalize(prop.Name, prop.Value)
                 };
 

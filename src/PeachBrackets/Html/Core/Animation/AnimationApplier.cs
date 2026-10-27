@@ -257,9 +257,11 @@ namespace PeachBrackets.Html.Animation
                 CssGlobalKeyword.Inherit when box.ParentBox is not null => CssUtils.GetPropertyValue(box.ParentBox, name),
                 CssGlobalKeyword.Unset when box.ParentBox is not null && CssDefaults.InheritedProperties.Contains(name) => CssUtils.GetPropertyValue(box.ParentBox, name),
                 // The snapshot holds null for a property the UA left unset, which reverts to the initial value.
-                CssGlobalKeyword.Revert => uaSnapshot is not null && uaSnapshot.TryGetValue(name, out var uaValue) && uaValue is not null
-                    ? uaValue
-                    : CssDefaults.GetInitialValue(name),
+                // The UA's logical margins never reach that physical snapshot (see CssBox.UaMarginForPhysical).
+                CssGlobalKeyword.Revert => box.UaMarginForPhysical(name)
+                    ?? (uaSnapshot is not null && uaSnapshot.TryGetValue(name, out var uaValue) && uaValue is not null
+                        ? uaValue
+                        : CssDefaults.GetInitialValue(name)),
                 CssGlobalKeyword.RevertLayer => CssUtils.GetPropertyValue(box, name),
                 _ => CssDefaults.GetInitialValue(name)
             };

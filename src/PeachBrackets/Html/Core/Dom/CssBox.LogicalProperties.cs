@@ -80,6 +80,33 @@ namespace PeachBrackets.Html.Dom
             _ => null,
         };
 
+        /// <summary>
+        /// The UA's logical margin that lands on the physical side named by a margin longhand, if the UA
+        /// sheet declared one for that side. A `margin-top: revert` has no physical UA declaration to fall
+        /// back on when the UA spelled its default logically (`p { margin-block: ... }`), so this is what
+        /// that revert reveals.
+        /// </summary>
+        internal string? UaMarginForPhysical(string propertyName)
+        {
+            var side = propertyName.ToLowerInvariant() switch
+            {
+                "margin-top" => PhysicalSide.Top,
+                "margin-right" => PhysicalSide.Right,
+                "margin-bottom" => PhysicalSide.Bottom,
+                "margin-left" => PhysicalSide.Left,
+                _ => (PhysicalSide?)null,
+            };
+            if (side is not { } physicalSide) return null;
+
+            var writingMode = WritingMode.Value;
+            var direction = Direction.Value;
+            if (physicalSide == LogicalPropertyResolver.BlockStart(writingMode)) return UaMarginBlockStart;
+            if (physicalSide == LogicalPropertyResolver.BlockEnd(writingMode)) return UaMarginBlockEnd;
+            if (physicalSide == LogicalPropertyResolver.InlineStart(writingMode, direction)) return UaMarginInlineStart;
+            if (physicalSide == LogicalPropertyResolver.InlineEnd(writingMode, direction)) return UaMarginInlineEnd;
+            return null;
+        }
+
         /// <summary>Bits of the physical margin sides an author declaration has written (see MarkAuthorMargin).</summary>
         internal byte AuthorMarginSides { get; set; }
 
@@ -93,7 +120,9 @@ namespace PeachBrackets.Html.Dom
                 && BorderBlockStartWidth is null && BorderBlockStartStyle is null && BorderBlockStartColor is null
                 && BorderBlockEndWidth is null && BorderBlockEndStyle is null && BorderBlockEndColor is null
                 && BorderInlineStartWidth is null && BorderInlineStartStyle is null && BorderInlineStartColor is null
-                && BorderInlineEndWidth is null && BorderInlineEndStyle is null && BorderInlineEndColor is null)
+                && BorderInlineEndWidth is null && BorderInlineEndStyle is null && BorderInlineEndColor is null
+                && UaMarginBlockStart is null && UaMarginBlockEnd is null
+                && UaMarginInlineStart is null && UaMarginInlineEnd is null)
             {
                 return;
             }

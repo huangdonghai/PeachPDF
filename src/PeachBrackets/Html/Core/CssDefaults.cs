@@ -74,33 +74,16 @@ namespace PeachBrackets.Html
             th              { font-weight: bolder; text-align: center }
             caption         { text-align: center }
             body            { margin: 8px }
-            h1              { font-size: 2em; margin: .67em 0 }
-            h2              { font-size: 1.5em; margin: .75em 0 }
-            h3              { font-size: 1.17em; margin: .83em 0 }
+            h1              { font-size: 2em; margin-block: .67em }
+            h2              { font-size: 1.5em; margin-block: .75em }
+            h3              { font-size: 1.17em; margin-block: .83em }
             h4, p,
             blockquote, ul,
             fieldset, form,
             ol, dl, dir,
-            menu            { margin: 1.12em 0 }
-            h5              { font-size: .83em; margin: 1.5em 0 }
-            h6              { font-size: .75em; margin: 1.67em 0 }
-            /* Logical twins of the block margins above. A browser's UA declares these logically, so in
-               a vertical writing mode they are the horizontal gaps between columns; the physical
-               declarations above only ever reach the inline axis there. They are applied only where no
-               author margin owns the side (CssBox.ResolveLogicalProperties), and a revert in an author
-               rule elevates them to an author declaration, which is what `margin-block-end: revert`
-               means in Chrome: the author's physical margin on that side gives way to the UA value. */
-            body            { margin-block-start: 8px; margin-block-end: 8px }
-            h1              { margin-block-start: .67em; margin-block-end: .67em }
-            h2              { margin-block-start: .75em; margin-block-end: .75em }
-            h3              { margin-block-start: .83em; margin-block-end: .83em }
-            h4, p,
-            blockquote, ul,
-            fieldset, form,
-            ol, dl, dir,
-            menu            { margin-block-start: 1.12em; margin-block-end: 1.12em }
-            h5              { margin-block-start: 1.5em; margin-block-end: 1.5em }
-            h6              { margin-block-start: 1.67em; margin-block-end: 1.67em }
+            menu            { margin-block: 1.12em }
+            h5              { font-size: .83em; margin-block: 1.5em }
+            h6              { font-size: .75em; margin-block: 1.67em }
             h1, h2, h3, h4,
             h5, h6, b,
             strong          { font-weight: bolder; }
@@ -197,7 +180,7 @@ namespace PeachBrackets.Html
                               line-height: inherit; font-variant-position: super }
             }
             ol ul, ul ol,
-            ul ul, ol ol    { margin-top: 0; margin-bottom: 0 }
+            ul ul, ol ol    { margin-block: 0 }
             ol ul, ul ul    { list-style-type: circle }
             ul ul ul, 
             ol ul ul, 
@@ -245,7 +228,7 @@ namespace PeachBrackets.Html
             a               { color: #0055BB; text-decoration:underline }
             table           { border-color:#dfdfdf; }
             td, th          { border-color:#dfdfdf; }
-            pre             { font-size: 10pt; margin-top: 15px; }
+            pre             { font-size: 10pt; margin-block-start: 15px; }
 
             /* Default -peachpdf-pdf-tag-type mapping (used only when tagged PDF output is
                enabled; harmless no-op otherwise). Author stylesheets may override any of

@@ -879,7 +879,7 @@ namespace PeachBrackets.Html.Dom
             // real chance to fire.
             var heightIsAuto = !CssValueParser.IsValidLength(blockBox.Height);
             var wrapLimit = heightIsAuto
-                ? Math.Max(1, blockBox.HtmlContainer?.PageSize.Height ?? 1)
+                ? AutoHeightInlineWrapLimit(blockBox)
                 : Math.Max(1, DefiniteContentHeight(blockBox));
 
             var frame = WritingModeFrame.ForContentBox(
@@ -1298,6 +1298,33 @@ namespace PeachBrackets.Html.Dom
 
             collectedWords[index] = prefix;
             collectedWords.Insert(index + 1, suffix);
+        }
+
+        /// <summary>
+        /// The inline-axis extent an auto-height vertical box wraps against: the page's remaining depth
+        /// from the box's own top edge (never more than one page), less the box's inline margins.
+        /// </summary>
+        /// <remarks>
+        /// The fallback used to be one full page measured from the box's own (offset) top edge, which let
+        /// content run past the page bottom by exactly that offset - a box starting 8px down could reach
+        /// pageHeight + 8px, and a hair of overflow is enough to make the fragmentainer emit an extra,
+        /// empty page. A box the monolithic-content mover relocates is laid out again at its new top, so
+        /// this cannot pin anything to a sliver of the old page.
+        /// </remarks>
+        private static double AutoHeightInlineWrapLimit(CssBox blockBox)
+        {
+            var container = blockBox.HtmlContainer;
+            var pageHeight = Math.Max(1, container?.PageSize.Height ?? 1);
+
+            double pageTop = 0;
+            if (container is { HasRealPageGrid: true })
+            {
+                pageTop = container.PageTopOf(container.PageIndexOf(blockBox.ClientTop));
+            }
+
+            var remaining = pageHeight - Math.Max(0, blockBox.ClientTop - pageTop);
+            var inset = blockBox.VerticalAutoInlineInset;
+            return Math.Max(1, Math.Min(pageHeight, remaining) - inset.Start - inset.End);
         }
 
         /// <summary>

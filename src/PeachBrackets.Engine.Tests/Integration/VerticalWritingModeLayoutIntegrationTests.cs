@@ -451,8 +451,8 @@ namespace PeachPDF.Tests.Integration
                 <div style="writing-mode: vertical-rl">
                   <div style="position: running(aside)"><p>Running content.</p></div>
                   <div style="float: left; width: 20pt; height: 20pt">Float.</div>
-                  <p id="p1" style="width: 40pt">First.</p>
-                  <p id="p2" style="width: 40pt">Second.</p>
+                  <p id="p1" style="width: 40pt; margin: 0">First.</p>
+                  <p id="p2" style="width: 40pt; margin: 0">Second.</p>
                 </div>
                 """);
 
@@ -1591,7 +1591,7 @@ namespace PeachPDF.Tests.Integration
             var html = LayoutHarness.Wrap("""
                 <div id="wrapper" style="writing-mode: vertical-rl">
                 <div id="box">
-                <p>A block child not this box's own direct text</p>
+                <p style="margin: 0">A block child not this box's own direct text</p>
                 </div>
                 </div>
                 """);
@@ -1658,8 +1658,8 @@ namespace PeachPDF.Tests.Integration
         {
             var html = LayoutHarness.Wrap("""
                 <div id="el" style="writing-mode: vertical-rl; width: 200px; height: 300px">
-                <p id="p1" style="width: 40pt">First. <span style="position: absolute">Positioned.</span></p>
-                <p id="p2" style="width: 40pt">Second.</p>
+                <p id="p1" style="width: 40pt; margin: 0">First. <span style="position: absolute">Positioned.</span></p>
+                <p id="p2" style="width: 40pt; margin: 0">Second.</p>
                 </div>
                 """);
 

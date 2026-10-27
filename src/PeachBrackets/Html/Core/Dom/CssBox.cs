@@ -3214,6 +3214,12 @@ namespace PeachBrackets.Html.Dom
         internal bool _pendingVerticalInlineFinalize { get => _rare is null ? default(bool) : _rare._pendingVerticalInlineFinalize; set { if (_rare is null) { if (EqualityComparer<bool>.Default.Equals(value, default(bool))) return; _rare = new BoxRareState(); } _rare._pendingVerticalInlineFinalize = value; } }
 
         /// <summary>
+        /// The inline-axis margins a vertical parent placed this box with, for an auto height only: the
+        /// box's content may use the page's depth less these two ends (see CreateVerticalLineBoxes).
+        /// </summary>
+        internal (double Start, double End) VerticalAutoInlineInset;
+
+        /// <summary>
         /// Whether this box has already taken an <see cref="EarlyBreak"/> on this fragmentainer pass.
         /// </summary>
         /// <remarks>
@@ -5497,8 +5503,17 @@ namespace PeachBrackets.Html.Dom
                     ? marginBoxBlockStart.X - startMargin - childWidth
                     : marginBoxBlockStart.X + startMargin;
 
-                childBox.Location = new PaintPoint(trueX, clientTop);
-                childBox.ActualBottom = clientTop;
+                // The inline axis is physical Y here, so a child's inline-start margin (physical
+                // margin-top, or a logical margin-inline-start resolved onto it) is the gap above it -
+                // a browser indents every vertical block by it. A definite height already sizes the
+                // content box itself; an auto height is resolved against a full page (CreateVerticalLineBoxes'
+                // own fallback), which then has to give the two margins up explicitly.
+                var inlineStartMargin = frame.InlineStartIsBottom ? childBox.ActualMarginBottom : childBox.ActualMarginTop;
+                var inlineEndMargin = frame.InlineStartIsBottom ? childBox.ActualMarginTop : childBox.ActualMarginBottom;
+                childBox.VerticalAutoInlineInset = heightIsAuto ? (inlineStartMargin, inlineEndMargin) : (0, 0);
+
+                childBox.Location = new PaintPoint(trueX, clientTop + inlineStartMargin);
+                childBox.ActualBottom = clientTop + inlineStartMargin;
 
                 await childBox.LayoutContentAtItsAssignedPosition(g);
 
@@ -5552,7 +5567,7 @@ namespace PeachBrackets.Html.Dom
                 }
 
                 hasPrecedingSibling = true;
-                maxCrossExtent = Math.Max(maxCrossExtent, childBox.ActualBottom);
+                maxCrossExtent = Math.Max(maxCrossExtent, childBox.ActualBottom + inlineEndMargin);
                 stackedChildren?.Add(childBox);
             }
 
