@@ -1821,6 +1821,32 @@ namespace PeachPDF.Tests.Integration
             }
         }
 
+        [Fact]
+        public async Task VerticalRl_PaddedInlineBlock_KeepsItsMarginsPaddingAndLineHeightWidth()
+        {
+            // The book's .bk labels are inline-blocks with margin-top and padding-bottom - in a vertical
+            // writing mode both are inline-axis spacing along the column - and `line-height: 100%`, which
+            // is their thickness across the column. The flat vertical word stream used to run their text
+            // flush into the neighbours (no margin/padding advance) and size their painted box from the
+            // glyphs' font box (font height, wider than one line-height).
+            var html = LayoutHarness.Wrap("""
+                <div id="v" style="writing-mode: vertical-rl; font-size: 20pt; line-height: 1.5">中<span id="label" style="display: inline-block; font-size: 0.5em; line-height: 100%; margin-top: 0.1em; margin-bottom: 0; padding-bottom: 0.1em; background-color: black">索隱</span>國</div>
+                """);
+
+            var (root, _) = await LayoutHarness.LayoutAsync(html);
+            var v = LayoutHarness.FindById(root, "v")!;
+            var label = LayoutHarness.FindById(root, "label")!;
+            var words = v.LineBoxes.Single().Words.Where(w => !w.IsLineBreak).ToList();
+
+            Assert.Equal(4, words.Count);
+            Assert.Equal(1, words[1].Top - words[0].Bottom, 2);   // margin-top: 0.1em of 10pt
+            Assert.Equal(1, words[3].Top - words[2].Bottom, 2);   // padding-bottom: 0.1em of 10pt
+
+            var rect = Assert.Single(label.Rectangles).Value;
+            Assert.Equal(10, rect.Width, 2);                      // line-height: 100% of 10pt
+            Assert.Equal((v.ClientLeft + v.ClientRight) / 2, rect.X + rect.Width / 2, 2);
+        }
+
         private static double LineBoxBlockExtent(CssBox box) =>
             box.LineBoxes.Sum(line =>
                 line.Words.Where(word => !word.IsLineBreak).Max(word => word.OwnerBox.ActualLineHeight));

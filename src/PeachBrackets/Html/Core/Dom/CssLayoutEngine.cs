@@ -1001,6 +1001,54 @@ namespace PeachBrackets.Html.Dom
                 }
             }
 
+            // The room an inline box's own vertical margins, borders and padding take along the column
+            // when the word stream crosses its boundary - the vertical counterpart of FlowBox's
+            // leading/trailing spacing around an inline box. Without it a padded inline-block label (the
+            // book's .bk) ran flush into its neighbours and its margin/padding had no effect at all.
+            // `previous` null means the column's own start; `current` null means its end.
+            var inlineChains = new Dictionary<CssBox, List<CssBox>>();
+            List<CssBox> InlineChain(CssBox owner)
+            {
+                if (inlineChains.TryGetValue(owner, out var cached)) return cached;
+
+                var chain = new List<CssBox>();
+                for (var b = owner; b is not null && !ReferenceEquals(b, blockBox); b = b.ParentBox) chain.Add(b);
+                chain.Reverse();
+                return inlineChains[owner] = chain;
+            }
+
+            // In vertical-rl/lr with direction ltr, the inline axis runs down the page: entering a box
+            // meets its physical top edges and leaving it its bottom ones. direction: rtl reverses both.
+            double EnteringEdge(CssBox box) => frame.InlineStartIsBottom
+                ? box.ActualMarginBottom + box.ActualBorderBottomWidth + box.ActualPaddingBottom
+                : box.ActualMarginTop + box.ActualBorderTopWidth + box.ActualPaddingTop;
+
+            double LeavingEdge(CssBox box) => frame.InlineStartIsBottom
+                ? box.ActualMarginTop + box.ActualBorderTopWidth + box.ActualPaddingTop
+                : box.ActualMarginBottom + box.ActualBorderBottomWidth + box.ActualPaddingBottom;
+
+            double InlineBoundaryAdvance(CssRect? previous, CssRect? current)
+            {
+                List<CssBox> currentChain = current is null ? [] : InlineChain(current.OwnerBox);
+                var total = 0d;
+                var common = 0;
+
+                if (previous is not null)
+                {
+                    var previousChain = InlineChain(previous.OwnerBox);
+                    while (common < previousChain.Count && common < currentChain.Count
+                           && ReferenceEquals(previousChain[common], currentChain[common]))
+                    {
+                        common++;
+                    }
+
+                    for (var i = previousChain.Count - 1; i >= common; i--) total += LeavingEdge(previousChain[i]);
+                }
+
+                for (var i = common; i < currentChain.Count; i++) total += EnteringEdge(currentChain[i]);
+                return total;
+            }
+
             // Whether blockBox's own white-space permits a column break anywhere in its content at all -
             // FlowBox's own `blockBoxPermitsWrap` counterpart (issue #841). Read once: if blockBox itself
             // is nowrap/pre, no line break is legal anywhere in its content, so the nested-nowrap-run
@@ -1073,6 +1121,11 @@ namespace PeachBrackets.Html.Dom
                     continue;
                 }
 
+                // An inline box's own vertical margins, borders and padding take up room along the column
+                // when the stream enters or leaves it (see InlineBoundaryAdvance).
+                var previousWord = line.Words.Count > 0 ? line.Words[^1] : null;
+                inlineOffset += InlineBoundaryAdvance(previousWord, word);
+
                 // Re-measured fresh, never read off word.Width/Height directly: this box's own content
                 // layout can run more than once (a flex/table/shrink-to-fit ancestor's provisional sizing
                 // pass, a monolithic relocation to a later page) and the geometry commit below overwrites
@@ -1082,7 +1135,6 @@ namespace PeachBrackets.Html.Dom
                 var wordRectInline = naturalWidth; // the word's own glyph footprint, no trailing space
                 var wordAdvance = naturalWidth + word.ActualWordSpacing; // + spacing, what the next word's placement clears
                 var wordBlock = naturalHeight; // natural line-height - the line's own cross-axis thickness
-                var previousWord = line.Words.Count > 0 ? line.Words[^1] : null;
                 var isGraphemeBoundary = IsGraphemeBoundaryBefore(
                     previousWord, word, trailingRegionalIndicatorCount, trailingGraphemeContext);
                 var hasOrdinaryWrapBefore = HasOrdinaryWrapOpportunityBefore(
@@ -1176,7 +1228,7 @@ namespace PeachBrackets.Html.Dom
                                           && (i == 0 || words[i - 1].OwnerBox != word.OwnerBox);
 
                 var wrapsWholeNoWrapRun = false;
-                if (entersNewNoWrapRun && inlineOffset > columnTextStart)
+                if (entersNewNoWrapRun && line.Words.Count > 0)
                 {
                     // The run's own total *inline-axis* (along-the-column) extent - NaturalWordSize's
                     // Width, the same quantity wordAdvance above is built from, not Height (the cross-axis
@@ -1193,19 +1245,25 @@ namespace PeachBrackets.Html.Dom
 
                 // A fragment split from what was one word - a per-codepoint-font run, or a
                 // Vertical_Orientation run - must never itself be treated as a wrap opportunity, the same
-                // guard FlowBox's own wrap check already applies. inlineOffset > 0 (a real word already
-                // placed in this column) avoids wrapping a column that is still empty - the same
-                // unavoidable-overflow fallback FlowBox's own first-word-of-a-line case gets.
-                var startedNewLine = inlineOffset > columnTextStart
+                // guard FlowBox's own wrap check already applies. A column that holds no word yet never
+                // wraps (the same unavoidable-overflow fallback FlowBox's own first-word-of-a-line case
+                // gets); a boundary advance alone does not count as content.
+                var startedNewLine = line.Words.Count > 0
                     && ((hasOrdinaryWrapBefore && wordDoesNotFit)
                         || (!hasOrdinaryWrapBefore && wordDoesNotFit
                             && isGraphemeBoundary && AllowsOverflowWrapAtBoundary(previousWord, word))
                         || (!word.SuppressWrapBefore && wrapsWholeNoWrapRun));
                 if (startedNewLine)
+                {
                     await StartNewLine();
 
-                if (startedNewLine && naturalWidth > effectiveWrapLimit - columnTextStart &&
-                    TryOverflowWrapWord(g, word, effectiveWrapLimit - columnTextStart, out overflowPrefix,
+                    // The new column starts before this word's own inline boxes open, so their leading
+                    // edges apply again from that fresh edge.
+                    inlineOffset += InlineBoundaryAdvance(null, word);
+                }
+
+                if (startedNewLine && naturalWidth > effectiveWrapLimit - inlineOffset &&
+                    TryOverflowWrapWord(g, word, effectiveWrapLimit - inlineOffset, out overflowPrefix,
                         out overflowSuffix))
                 {
                     ReplaceCollectedWordWithOverflowWrapSplit(words, i, word, overflowPrefix!, overflowSuffix!);
@@ -1252,6 +1310,10 @@ namespace PeachBrackets.Html.Dom
                 lineThickness = Math.Max(lineThickness,
                     word.IsImage ? wordBlock : LineBoxExtentOf(word, blockBox));
             }
+
+            // The last word's own inline boxes close at the column's end; their trailing padding, border
+            // and margin still occupy room there, exactly as FlowBox's trailing spacing does per line.
+            inlineOffset += InlineBoundaryAdvance(line.Words.Count > 0 ? line.Words[^1] : null, null);
 
             maxInlineExtentUsed = Math.Max(maxInlineExtentUsed, inlineOffset);
             CenterColumnWords(lineThickness);
@@ -7675,6 +7737,7 @@ namespace PeachBrackets.Html.Dom
             {
                 double x = float.MaxValue, y = float.MaxValue, r = float.MinValue, b = float.MinValue;
                 var any = false;
+                var contentLineExtent = 0d;
 
                 foreach (var word in line.Words)
                 {
@@ -7685,11 +7748,18 @@ namespace PeachBrackets.Html.Dom
                     r = Math.Max(r, word.Right);
                     y = Math.Min(y, word.Top);
                     b = Math.Max(b, word.Bottom);
+                    contentLineExtent = Math.Max(contentLineExtent, word.OwnerBox.ActualLineHeight);
                 }
 
                 if (!any) return;
 
-                line.UpdateRectangle(box, x, y, r, b);
+                // A vertical line's cross axis is physical width: an atomic inline-level box (an
+                // inline-block label) is exactly as thick as its own content's line box, not as the font
+                // box of the glyphs inside it. Chrome paints the book's .bk labels one line-height thick,
+                // with their glyphs overhanging both sides.
+                var vertical = line.OwnerBox.WritingMode.Value
+                    is WritingMode.VerticalRl or WritingMode.VerticalLr;
+                line.UpdateRectangle(box, x, y, r, b, vertical ? contentLineExtent : null);
             }
             else
             {

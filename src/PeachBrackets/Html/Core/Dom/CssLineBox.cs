@@ -270,8 +270,20 @@ namespace PeachBrackets.Html.Dom
         /// <param name="y"></param>
         /// <param name="r"></param>
         /// <param name="b"></param>
-        internal void UpdateRectangle(CssBox box, double x, double y, double r, double b)
+        /// <param name="contentLineExtent">
+        /// For a vertical line, the line-box extent of the content that produced this rectangle (null on a
+        /// horizontal line). An atomic inline-level box is as thick across the column as that extent, not as
+        /// the font box the glyph bounds cover; see <see cref="CssLayoutEngine.BubbleRectangles"/>.
+        /// </param>
+        internal void UpdateRectangle(CssBox box, double x, double y, double r, double b, double? contentLineExtent = null)
         {
+            if (contentLineExtent is { } lineExtent && lineExtent > 0 && IsAtomicInlineLevel(box))
+            {
+                var centre = (x + r) / 2;
+                x = centre - lineExtent / 2;
+                r = centre + lineExtent / 2;
+            }
+
             var leftSpacing = box.ActualBorderLeftWidth + box.ActualPaddingLeft;
             var rightSpacing = box.ActualBorderRightWidth + box.ActualPaddingRight;
             var topSpacing = box.ActualBorderTopWidth + box.ActualPaddingTop;
@@ -311,9 +323,14 @@ namespace PeachBrackets.Html.Dom
             // gave that container a stray second rectangle at the image's position.
             if (box.IsInline && box.ParentBox is { IsInline: true })
             {
-                UpdateRectangle(box.ParentBox, x, y, r, b);
+                UpdateRectangle(box.ParentBox, x, y, r, b, contentLineExtent);
             }
         }
+
+        /// <summary>Whether <paramref name="box"/> is an atomic inline-level box (css-display-3 §2.7).</summary>
+        private static bool IsAtomicInlineLevel(CssBox box) =>
+            box.DerivedStyle.ActualDisplay is Keywords.InlineBlock or Keywords.InlineTable
+                or Keywords.InlineFlex or Keywords.InlineGrid;
 
         /// <summary>
         /// Copies the rectangles to their specified box
