@@ -1799,6 +1799,28 @@ namespace PeachPDF.Tests.Integration
             Assert.NotEqual(default, floatBox.Location);
         }
 
+        [Fact]
+        public async Task VerticalRl_SmallerInlineRuns_AreCentredInTheColumn()
+        {
+            // Chrome centres every inline box across the column's line box - a 0.8em note marker or an
+            // inline-block label included - rather than hanging each from the block-start edge, which
+            // left a small run flush against the column's right edge while the text around it sat
+            // further in. Centre equality is the whole assertion: the column is one line-height thick.
+            var html = LayoutHarness.Wrap("""
+                <div id="v" style="writing-mode: vertical-rl; font-size: 20pt">中<span style="font-size: 0.5em">㊅</span>國</div>
+                """);
+
+            var (root, _) = await LayoutHarness.LayoutAsync(html);
+            var v = LayoutHarness.FindById(root, "v")!;
+            var line = v.LineBoxes.Single(l => l.Words.Count(w => !w.IsLineBreak) == 3);
+            var columnCentre = (v.ClientLeft + v.ClientRight) / 2;
+
+            foreach (var word in line.Words.Where(w => !w.IsLineBreak))
+            {
+                Assert.Equal(columnCentre, (word.Left + word.Right) / 2, 2);
+            }
+        }
+
         private static double LineBoxBlockExtent(CssBox box) =>
             box.LineBoxes.Sum(line =>
                 line.Words.Where(word => !word.IsLineBreak).Max(word => word.OwnerBox.ActualLineHeight));
@@ -1808,20 +1830,26 @@ namespace PeachPDF.Tests.Integration
             var expectedBlockStart = box.WritingMode.Value == WritingMode.VerticalRl
                 ? box.ClientRight
                 : box.ClientLeft;
+            var isRl = box.WritingMode.Value == WritingMode.VerticalRl;
 
             foreach (var line in box.LineBoxes)
             {
                 var words = line.Words.Where(word => !word.IsLineBreak).ToList();
                 var thickness = words.Max(word => word.OwnerBox.ActualLineHeight);
-                var actualBlockStart = box.WritingMode.Value == WritingMode.VerticalRl
-                    ? words.Max(word => word.Right)
-                    : words.Min(word => word.Left);
+                var columnEnd = isRl ? expectedBlockStart - thickness : expectedBlockStart + thickness;
+                var columnCentre = (expectedBlockStart + columnEnd) / 2;
 
-                Assert.Equal(expectedBlockStart, actualBlockStart, 1);
-                expectedBlockStart += box.WritingMode.Value == WritingMode.VerticalRl ? -thickness : thickness;
+                // A column spans one line-height from the running block start, and flow centres every
+                // word across it (Chrome's own placement) rather than hanging each from the edge.
+                foreach (var word in words)
+                {
+                    Assert.Equal(columnCentre, (word.Left + word.Right) / 2, 1);
+                }
+
+                expectedBlockStart = columnEnd;
             }
 
-            var expectedBlockEnd = box.WritingMode.Value == WritingMode.VerticalRl
+            var expectedBlockEnd = isRl
                 ? box.ClientLeft
                 : box.ClientRight;
             Assert.Equal(expectedBlockEnd, expectedBlockStart, 1);

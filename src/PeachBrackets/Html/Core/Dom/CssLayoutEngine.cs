@@ -983,6 +983,24 @@ namespace PeachBrackets.Html.Dom
 
             ResetColumnStart();
 
+            // A column's words are centered across it, not hung from its block-start edge: the line box
+            // is the block's line-height thick, and Chrome centers every inline box (a smaller note
+            // marker, an inline-block label) within it - only centering the glyph inside its own font
+            // box, as flow-time placement does, left a 0.8em marker hugging the start edge and every
+            // glyph a hair off the line box's own centre. The column's thickness is only final once its
+            // last word has landed (a later, larger run can grow it), so this runs when a column closes.
+            void CenterColumnWords(double columnThickness)
+            {
+                if (columnThickness <= 0) return;
+
+                var towardBlockEnd = frame.BlockStartIsRight ? -1d : 1d;
+                foreach (var columnWord in line.Words)
+                {
+                    var delta = (columnThickness - columnWord.Width) / 2 * towardBlockEnd;
+                    if (delta != 0) columnWord.Left += delta;
+                }
+            }
+
             // Whether blockBox's own white-space permits a column break anywhere in its content at all -
             // FlowBox's own `blockBoxPermitsWrap` counterpart (issue #841). Read once: if blockBox itself
             // is nowrap/pre, no line break is legal anywhere in its content, so the nested-nowrap-run
@@ -1001,6 +1019,7 @@ namespace PeachBrackets.Html.Dom
                 currentColumnHyphenated = false;
 
                 maxInlineExtentUsed = Math.Max(maxInlineExtentUsed, inlineOffset);
+                CenterColumnWords(lineThickness);
                 blockOffset += lineThickness;
                 lineThickness = 0;
                 trailingRegionalIndicatorCount = 0;
@@ -1235,6 +1254,7 @@ namespace PeachBrackets.Html.Dom
             }
 
             maxInlineExtentUsed = Math.Max(maxInlineExtentUsed, inlineOffset);
+            CenterColumnWords(lineThickness);
 
             // Floats after the last word, and the ones pinned to the bottom edge, which
             // CssBox.PerformLayoutEpilogue moves there once that edge is final. Placed before the auto width

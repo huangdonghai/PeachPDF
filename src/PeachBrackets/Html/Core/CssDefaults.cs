@@ -74,16 +74,21 @@ namespace PeachBrackets.Html
             th              { font-weight: bolder; text-align: center }
             caption         { text-align: center }
             body            { margin: 8px }
+            /* Chrome's html.css block margins. CSS 2.1's sample sheet (the basis of this one) uses
+               .75em/.83em for h2/h3 and 1.12em for paragraphs; every browser ships h2 .83em, h3 1em,
+               h4 1.33em and paragraph spacing of 1em, and a page written against a browser (this
+               engine's benchmark) shows the difference wherever `revert` or an unstyled paragraph
+               exposes the UA value. */
             h1              { font-size: 2em; margin-block: .67em }
-            h2              { font-size: 1.5em; margin-block: .75em }
-            h3              { font-size: 1.17em; margin-block: .83em }
-            h4, p,
-            blockquote, ul,
+            h2              { font-size: 1.5em; margin-block: .83em }
+            h3              { font-size: 1.17em; margin-block: 1em }
+            h4              { margin-block: 1.33em }
+            p, blockquote, ul,
             fieldset, form,
             ol, dl, dir,
-            menu            { margin-block: 1.12em }
-            h5              { font-size: .83em; margin-block: 1.5em }
-            h6              { font-size: .75em; margin-block: 1.67em }
+            menu            { margin-block: 1em }
+            h5              { font-size: .83em; margin-block: 1.67em }
+            h6              { font-size: .75em; margin-block: 2.33em }
             h1, h2, h3, h4,
             h5, h6, b,
             strong          { font-weight: bolder; }

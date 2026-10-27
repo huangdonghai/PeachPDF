@@ -2108,19 +2108,24 @@ namespace PeachBrackets.Html.Dom
                     // ActualFont.Ascent/Height elsewhere - no further PixelsPerPoint correction here.
                     return ActualFont.NormalLineHeight;
 
+                // A percentage line-height is relative to this element's own font size (CSS 2.1 §10.8.1),
+                // never to its used height - resolving "100%" against Size.Height made a heading's line box
+                // as thick as the whole heading once the box had been measured.
+                var percentageBasis = ActualFont.Size;
+
                 // Only a line-height that can itself contain lh (a calc might) needs the guard: there lh means
                 // the parent's, and reading this box's own would recurse. rlh reads the root's, which is never
                 // this box's own unless it is the root - and then there is no root above to consult. The
                 // unitless/absolute majority skips the guard entirely.
                 if (lineHeight.LengthOrCalc is not { } lengthOrCalc
                     || (!lengthOrCalc.IsCalc && lengthOrCalc.Length!.Value.Type != Length.Unit.Lh))
-                    return CssValueParser.ParseLength(lineHeight, Owner.Size.Height, Owner);
+                    return CssValueParser.ParseLength(lineHeight, percentageBasis, Owner);
 
                 var wasResolving = _resolvingLineHeight;
                 _resolvingLineHeight = true;
                 try
                 {
-                    return CssValueParser.ParseLength(lineHeight, Owner.Size.Height, Owner);
+                    return CssValueParser.ParseLength(lineHeight, percentageBasis, Owner);
                 }
                 finally
                 {

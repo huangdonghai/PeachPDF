@@ -305,6 +305,27 @@ namespace PeachPDF.Tests.Integration
             Assert.All(fragment.Lines, line => Assert.Equal(expected, line.Rect.Height, precision: 6));
         }
 
+        [Fact]
+        public async Task PercentageLineHeight_IsRelativeToTheFontSize_NotTheBoxsUsedHeight()
+        {
+            // CSS 2.1 §10.8.1: a percentage line-height is a fraction of the element's own font size. It
+            // used to resolve against Size.Height - a quantity the block only acquires from the very line
+            // box being sized - so a vertical heading's "100%" came out as thick as the whole heading
+            // (four 20pt characters made a ~87pt column) instead of one 20pt line.
+            var html = """
+                <!DOCTYPE html>
+                <html><body style="margin: 0">
+                  <div class="t" style="writing-mode: vertical-rl; font: 20pt sans-serif; line-height: 100%">一二三四</div>
+                </body></html>
+                """;
+
+            var (root, _) = await BuildCssBoxTree(html);
+            var target = FindBoxByClass(root, "t")!;
+
+            Assert.Equal(20, target.ActualLineHeight, 3);
+            Assert.Equal(20, target.ActualRight - target.Location.X, 3);
+        }
+
         private static BoxFragment? FindFragment(BoxFragment fragment, CssBox box)
         {
             if (ReferenceEquals(fragment.Box, box)) return fragment;
