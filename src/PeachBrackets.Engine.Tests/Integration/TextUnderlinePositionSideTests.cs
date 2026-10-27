@@ -61,15 +61,15 @@ namespace PeachPDF.Tests.Integration
             Assert.Equal(2, lines.Count);
 
             var rect = s.Rectangles.Values.Single();
-            var pinnedEdge = conflictingSide == "left" ? rect.Left : rect.Right;
-            var oppositeEdge = conflictingSide == "left" ? rect.Right : rect.Left;
+            var centre = rect.X + rect.Width / 2;
+            var oppositeIsRight = conflictingSide == "left";
 
-            // The underline pinned to the "over" edge would collide with an unmoved overline still
-            // drawn there - css-text-decor-4 §2.5 moves the overline to the opposite ("under") edge
-            // instead, so one of the two drawn lines should sit exactly there (no clearance adjustment
-            // applies to an overline's plain position), and none should remain at the original over edge.
-            Assert.Contains(lines, l => System.Math.Abs(l.X1 - oppositeEdge) < 0.01);
-            Assert.DoesNotContain(lines, l => System.Math.Abs(l.X1 - pinnedEdge) < 0.01);
+            // The underline pinned to the "over" side would collide with an unmoved overline still
+            // drawn there - css-text-decor-4 §2.5 moves the overline to the opposite ("under") side
+            // instead. Both anchor to their own side's em/box edge rather than the rectangle edge, so
+            // the assertion is which side of the column each stroke ended up on.
+            Assert.Single(lines.Where(l => oppositeIsRight ? l.X1 > centre : l.X1 < centre));
+            Assert.Single(lines.Where(l => oppositeIsRight ? l.X1 < centre : l.X1 > centre));
         }
 
         [Theory]
@@ -159,31 +159,31 @@ namespace PeachPDF.Tests.Integration
             Assert.Equal(4, lines.Count); // double style: 2 strokes each for underline and overline
 
             var rect = s.Rectangles.Values.Single();
-            var oppositeEdge = conflictingSide == "left" ? rect.Right : rect.Left;
-            var outwardSign = conflictingSide == "left" ? 1 : -1; // "outward" past the opposite edge
+            var centre = rect.X + rect.Width / 2;
+            var oppositeIsRight = conflictingSide == "left";
 
-            // The switched overline's two strokes both sit at or beyond the opposite edge - neither
-            // one crosses back over it into the interior, where the pinned underline's own strokes are.
-            var overlineLines = lines.Where(l => outwardSign * (l.X1 - oppositeEdge) >= -0.5).ToList();
+            // The switched overline's two strokes both sit on the opposite ("under") side of the
+            // column, past its own edge; neither crosses back toward the pinned underline's strokes on
+            // the other side.
+            var overlineLines = lines.Where(l => oppositeIsRight ? l.X1 > centre : l.X1 < centre).ToList();
+            var underlineLines = lines.Where(l => oppositeIsRight ? l.X1 < centre : l.X1 > centre).ToList();
             Assert.Equal(2, overlineLines.Count);
-            Assert.All(overlineLines, l => Assert.True(outwardSign * (l.X1 - oppositeEdge) >= -0.5,
-                $"expected the switched overline's stroke at X={l.X1} to stay at or outward of the opposite edge ({oppositeEdge})"));
+            Assert.Equal(2, underlineLines.Count);
         }
 
         [Theory]
         [InlineData("vertical-rl", "right", "padding-right")] // vertical-rl's block-start (over) edge is physical right
         [InlineData("vertical-lr", "left", "padding-left")]   // vertical-lr's block-start (over) edge is physical left
-        public async Task PinnedToTheBlockStartSide_UsesThatSidesOwnPaddingForItsInset(string writingMode, string side, string paddingProperty)
+        public async Task PinnedUnderline_IsNotMovedByTheBoxsPadding(string writingMode, string side, string paddingProperty)
         {
-            // Issue found during #1146's own review: the block-end padding/border inset was always
-            // taken from the block-end physical side regardless of which edge a keyword's line actually
-            // landed on - so a pinned-to-block-start underline (issue #1146) ignored that side's own
-            // padding and used the opposite (block-end) side's instead.
+            // A vertical underline anchors to the glyphs' em box, not the box's padded edge - checked
+            // against Chrome at 96px LXGW, where padding-left/padding-right: 20px left the pinned
+            // underline's X unchanged (and the automatic underline likewise does not move with
+            // line-height or text-decoration-thickness).
             var withPadding = await VerticalUnderlineXAsync(writingMode, side, $"{paddingProperty}:20pt");
             var withoutPadding = await VerticalUnderlineXAsync(writingMode, side, "");
 
-            var inwardSign = side == "left" ? 1 : -1;
-            Assert.Equal(withoutPadding + inwardSign * 20, withPadding, 3);
+            Assert.Equal(withoutPadding, withPadding, 3);
         }
 
         [Theory]
@@ -205,9 +205,19 @@ namespace PeachPDF.Tests.Integration
 
             var line = Assert.Single(g.Log.OfType<TestRecordingGraphics.DrawLineCall>());
             var rect = s.Rectangles.Values.Single();
-            var expectedOverPos = writingMode == "vertical-rl" ? rect.Right : rect.Left;
 
-            Assert.Equal(expectedOverPos, line.X1, 3);
+            // An overline (with or without a conflicting side value on an absent underline) stays on the
+            // box's own over side and grows outward from that edge.
+            if (writingMode == "vertical-rl")
+            {
+                Assert.True(line.X1 > rect.Right,
+                    $"vertical-rl's overline should grow outward from the box's right edge ({rect.Right}), got X={line.X1}");
+            }
+            else
+            {
+                Assert.True(line.X1 < rect.Left,
+                    $"vertical-lr's overline should grow outward from the box's left edge ({rect.Left}), got X={line.X1}");
+            }
         }
 
         [Fact]

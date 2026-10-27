@@ -42,10 +42,12 @@ namespace PeachPDF.Tests.Integration
         [Fact]
         public async Task Overline_VerticalRl_SitsOnThePhysicalRightSide_TheOverEdge()
         {
+            // The overline keeps its near edge on the box's own over edge and grows outward from it
+            // (Chrome-verified placement), so for vertical-rl it sits at or beyond the right edge.
             var (_, rect, g) = await PaintAsync("vertical-rl", "overline");
 
             var line = Assert.Single(Lines(g));
-            Assert.Equal(rect.Right, line.X1, 3);
+            Assert.True(line.X1 > rect.Right, $"vertical-rl's overline should sit on the physical right (over) side, got X={line.X1} vs edge {rect.Right}");
         }
 
         [Fact]
@@ -65,7 +67,7 @@ namespace PeachPDF.Tests.Integration
             var (_, rect, g) = await PaintAsync("vertical-lr", "overline");
 
             var line = Assert.Single(Lines(g));
-            Assert.Equal(rect.Left, line.X1, 3);
+            Assert.True(line.X1 < rect.Left, $"vertical-lr's overline should sit on the physical left (over) side, got X={line.X1} vs edge {rect.Left}");
         }
 
         [Fact]
@@ -86,11 +88,11 @@ namespace PeachPDF.Tests.Integration
             Assert.Equal(2, lines.Count);
             Assert.All(lines, l => Assert.Equal(l.X1, l.X2, 3)); // both still true vertical strokes: constant X
 
-            // Overline's near stroke sits at the "over" edge (physical right); the outer stroke grows
-            // further toward "over" - i.e. further right still, for vertical-rl.
+            // Overline's near stroke starts at the "over" edge (physical right) and the outer stroke
+            // grows further toward "over" - i.e. further right still, for vertical-rl.
             var near = lines.OrderBy(l => System.Math.Abs(l.X1 - rect.Right)).First();
             var outer = lines.Except([near]).Single();
-            Assert.Equal(rect.Right, near.X1, 3);
+            Assert.True(near.X1 > rect.Right, "vertical-rl's overline should start at the over edge and grow outward");
             Assert.True(outer.X1 > near.X1, "vertical-rl's double overline should grow further right (toward 'over')");
         }
 

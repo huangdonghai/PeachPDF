@@ -1120,31 +1120,30 @@ namespace PeachBrackets.Html.Paint
             // respectively - regardless of writing mode.
             var underSign = blockStartIsRight ? -1 : 1;
 
+            // The block-end physical padding/border widens a horizontal own-decoration rectangle; none of
+            // its lines hangs from that widening. (A true vertical mode needs no such inset - it anchors
+            // its underline to the glyphs' em box instead, see below.)
             double blockStartInset = 0, blockEndInset = 0;
-            if (ownDecorationArea)
+            if (ownDecorationArea && !isVertical)
             {
-                if (isVertical)
-                {
-                    blockStartInset = blockStartIsRight
-                        ? box.ActualPaddingRight - box.ActualBorderRightWidth
-                        : box.ActualPaddingLeft - box.ActualBorderLeftWidth;
-                    blockEndInset = blockStartIsRight
-                        ? box.ActualPaddingLeft - box.ActualBorderLeftWidth
-                        : box.ActualPaddingRight - box.ActualBorderRightWidth;
-                }
-                else
-                {
-                    blockStartInset = box.ActualPaddingTop - box.ActualBorderTopWidth;
-                    blockEndInset = box.ActualPaddingBottom - box.ActualBorderBottomWidth;
-                }
+                blockStartInset = box.ActualPaddingTop - box.ActualBorderTopWidth;
+                blockEndInset = box.ActualPaddingBottom - box.ActualBorderBottomWidth;
             }
 
             double overPos, underPos, throughPos;
+            double emCentre = 0, emHalf = 0;
             if (isVertical)
             {
+                // Chrome's true-vertical underline anchors to the glyphs' own em (advance) box - one
+                // font-size wide, centred on the column: at 96px LXGW its near edge sits on the em box's
+                // under edge and the stroke grows outward from there, unchanged by line-height or
+                // text-decoration-thickness (2/4/10/20px all keep that near edge). Its overline and
+                // line-through stay on the box's own edges like the horizontal ones do.
+                emHalf = font.Size / 2;
+                emCentre = (rectangle.Left + rectangle.Right) / 2;
                 overPos = blockStartIsRight ? rectangle.Right : rectangle.Left;
-                underPos = blockStartIsRight ? rectangle.Left : rectangle.Right;
-                throughPos = rectangle.X + rectangle.Width / 2;
+                underPos = blockStartIsRight ? emCentre - emHalf : emCentre + emHalf;
+                throughPos = emCentre;
             }
             else
             {
@@ -1164,23 +1163,29 @@ namespace PeachBrackets.Html.Paint
             // css-text-decor-4 §2.5's left/right half of text-underline-position (issue #1146): pins the
             // underline to a literal physical edge instead of the writing mode's own logical "under" side.
             // Meaningful only under a true vertical writing mode - inert under horizontal-tb, where there
-            // is no physical left/right edge distinct from the line's own inline extent.
+            // is no physical left/right edge distinct from the line's own inline extent. The pinned edge is
+            // the em box's own side, so the stroke grows outward from there exactly as the automatic one
+            // does from the em box's under edge.
             var underlineSide = isVertical ? styleSource.TextUnderlineSide.Value : TextUnderlineSide.Auto;
             var pinnedUnderlineEdge = underlineSide switch
             {
-                TextUnderlineSide.Left => rectangle.Left,
-                TextUnderlineSide.Right => rectangle.Right,
+                TextUnderlineSide.Left => emCentre - emHalf,
+                TextUnderlineSide.Right => emCentre + emHalf,
                 _ => (double?)null
             };
 
             // "If this causes the underline to be drawn on the 'over' side of the text, then an overline
-            // also switches sides and is drawn on the 'under' side" (§2.5) - so when the pinned edge above
-            // lands where the overline would otherwise draw, the overline moves to the opposite physical
-            // edge instead of overlapping it. Conditioned on an underline actually being one of this box's
-            // declared decoration lines: the note describes what happens when the underline "is drawn" -
-            // a box with only "overline" has no underline to collide with, so its overline must not be
-            // moved just because text-underline-position happens to name the conflicting side.
-            var overlineSwitchesSides = pinnedUnderlineEdge == overPos
+            // also switches sides and is drawn on the 'under' side" (§2.5) - so when the pinned side above
+            // is the over side, the overline moves to the opposite physical edge instead of overlapping it.
+            // Conditioned on an underline actually being one of this box's declared decoration lines: the
+            // note describes what happens when the underline "is drawn" - a box with only "overline" has no
+            // underline to collide with, so its overline must not be moved just because
+            // text-underline-position happens to name the conflicting side. Compared by side rather than by
+            // resolved coordinate: the pinned underline anchors to the em box while the overline anchors to
+            // the box's own edge, so the two coordinates never coincide even when both sit on that side.
+            var pinnedUnderlineOnOverSide = underlineSide != TextUnderlineSide.Auto
+                && (underlineSide == TextUnderlineSide.Right) == blockStartIsRight;
+            var overlineSwitchesSides = pinnedUnderlineOnOverSide
                 && ContainsDecorationLineKeyword(textDecorationLine, Keywords.Underline);
 
             double ResolveUnderlineCross()
@@ -1189,26 +1194,22 @@ namespace PeachBrackets.Html.Paint
 
                 if (pinnedUnderlineEdge is { } pinned)
                 {
-                    // Inset from the pinned edge toward the column's interior by the same clearance every
-                    // other vertical-mode underline keeps off its own edge - left's interior direction is
-                    // +X, right's is -X. text-underline-offset moves the line further from the text
-                    // instead - the opposite direction from clearance, mirroring the non-pinned formula
-                    // below's own clearance/offset sign relationship (ResolveDecorationOffset's remarks:
-                    // "a positive value moves the underline further from the text").
-                    var inwardSign = underlineSide == TextUnderlineSide.Left ? 1 : -1;
-                    return pinned + inwardSign * clearance - inwardSign * offset;
+                    // The pinned em-box side is the stroke's near edge; it grows outward (away from the
+                    // text) by its own thickness, and text-underline-offset moves it further out the same
+                    // way (ResolveDecorationOffset: "a positive value moves the underline further from
+                    // the text").
+                    var outwardSign = underlineSide == TextUnderlineSide.Left ? -1 : 1;
+                    return pinned + outwardSign * (thickness / 2 + offset);
                 }
 
-                // No real vertical baseline runs along a column (a true vertical mode's glyphs are
-                // either upright and individually placed, or a rotated horizontal run - neither has one
-                // alphabetic line the way horizontal text does), so `from-font`'s real-metric offset
-                // and `auto`'s baseline-relative clearance both fall back to the same rectangle-relative
-                // approximation there: inset from the "under" edge by the ordinary clearance amount,
-                // which keeps the line close to (but inside) that edge - visually verified by
-                // rasterizing rather than assumed exact against real vertical font metrics (a larger,
-                // separate undertaking - see .claude/accepted-gaps/no-vertical-writing-mode-layout.md).
+                // No real vertical baseline runs along a column (a true vertical mode's glyphs are either
+                // upright and individually placed, or a rotated horizontal run - neither has one alphabetic
+                // line the way horizontal text does), so `auto`/`from-font`/`under` all anchor to the
+                // glyphs' em box exactly as Chrome does there: the stroke's near edge sits on the em box's
+                // under edge and the stroke grows outward from it (measured against Chrome at 96px LXGW,
+                // where the near edge stayed put across 2/4/10/20px thicknesses).
                 if (isVertical)
-                    return underPos - underSign * clearance + underSign * offset;
+                    return underPos + underSign * (thickness / 2 + offset);
 
                 var basePos = styleSource.TextUnderlinePosition.Value switch
                 {
@@ -1240,7 +1241,11 @@ namespace PeachBrackets.Html.Paint
                 {
                     Keywords.Underline => ResolveUnderlineCross(),
                     Keywords.LineThrough => throughPos,
-                    Keywords.Overline => overlineSwitchesSides ? underPos : overPos,
+                    // Under a true vertical mode Chrome keeps the overline's near edge on the box's own
+                    // over edge, so the stroke grows outward from it rather than straddling the edge.
+                    Keywords.Overline => overlineSwitchesSides
+                        ? (isVertical ? underPos + underSign * thickness / 2 : underPos)
+                        : (isVertical ? overPos - underSign * thickness / 2 : overPos),
                     _ => double.NaN
                 };
 
@@ -1256,21 +1261,12 @@ namespace PeachBrackets.Html.Paint
                 var isAtOverEdge = line switch
                 {
                     Keywords.Overline => !overlineSwitchesSides,
-                    Keywords.Underline => pinnedUnderlineEdge is { } pinnedEdge && pinnedEdge == overPos,
+                    Keywords.Underline => pinnedUnderlineOnOverSide,
                     _ => false
                 };
 
-                // The inset itself, unlike growSign above, stays exactly at its pre-#1146 single
-                // block-end-based treatment under horizontal-tb (applied to every keyword uniformly,
-                // overline included) - only a true vertical mode's now-position-dependent keywords need
-                // the block-start side's own value at all.
-                // Under a vertical mode the position is an edge of the widened rectangle, so it is brought back
-                // inside the box's own padding here; horizontal-tb already measured from the text area above.
-                var insetAtBlockStart = isVertical && isAtOverEdge;
-                if (isVertical)
-                {
-                    cross += (insetAtBlockStart ? underSign : -underSign) * (insetAtBlockStart ? blockStartInset : blockEndInset);
-                }
+                // No padding/border inset applies under a true vertical mode: the line is anchored to the
+                // glyphs' em box, which the box's own padding does not move (see overPos/underPos above).
 
                 var exclusions = boxExclusions;
 
