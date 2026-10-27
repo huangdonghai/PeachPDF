@@ -68,8 +68,8 @@ namespace PeachPDF.Tests.Integration
             // drawn there - css-text-decor-4 §2.5 moves the overline to the opposite ("under") side
             // instead. Both anchor to their own side's em/box edge rather than the rectangle edge, so
             // the assertion is which side of the column each stroke ended up on.
-            Assert.Single(lines.Where(l => oppositeIsRight ? l.X1 > centre : l.X1 < centre));
-            Assert.Single(lines.Where(l => oppositeIsRight ? l.X1 < centre : l.X1 > centre));
+            Assert.Single(lines, l => oppositeIsRight ? l.X1 > centre : l.X1 < centre);
+            Assert.Single(lines, l => oppositeIsRight ? l.X1 < centre : l.X1 > centre);
         }
 
         [Theory]

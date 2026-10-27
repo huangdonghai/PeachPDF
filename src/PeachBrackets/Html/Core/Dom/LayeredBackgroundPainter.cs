@@ -16,7 +16,7 @@ namespace PeachBrackets.Html.Dom
     /// arbitrary rectangle with no real, laid-out <c>CssBox</c> to read from - the shared primitive
     /// behind both the <c>@page</c> box's own background (<c>PdfGenerator</c>, css-page-3 §3.1)
     /// and a page-margin box's background (<see cref="MarginBoxRenderer"/>, css-page-3 §5.1). Follows
-    /// the same no-CssBox pattern <see cref="MarginBoxRenderer.PaintImage"/> already established for a
+    /// the same no-CssBox pattern <see cref="MarginBoxRenderer.PaintImage(PeachDrawing.Core.Canvas, PeachBrackets.Html.Entities.CssImage, PeachDrawing.Core.Rect, string, PeachDrawing.Core.RenderContext, PeachBrackets.Html.HtmlContainerInt, double?)"/> already established for a
     /// margin box's <c>content: url(...)</c> - a real <c>CssBox</c> (<see cref="PaintAsync"/>'s
     /// <c>lengthBasisBox</c>, always <c>htmlContainer.Root</c> in practice) stands in purely as the
     /// em/rem length basis <see cref="Utils.BackgroundLayerResolver"/>/gradient resolution needs, never
