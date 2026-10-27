@@ -6,6 +6,7 @@ using PeachDrawing.Text.Internal.Fonts;
 using PeachDrawing.Text.Internal.Fonts.OpenType;
 using PeachDrawing.Text.Internal.Text;
 using System;
+using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Collections.Generic;
@@ -38,6 +39,17 @@ namespace PeachDrawing.Text.Internal.Fonts
         // effect.
         private static readonly ConcurrentDictionary<(string Path, int FaceIndex), byte[]> _systemFontBytesCache = new();
 
+        /// <summary>
+        /// Per-face <c>cmap</c> tables, process-wide: the fallback search only ever asks coverage questions,
+        /// and a whole CJK font weighs tens of megabytes where its <c>cmap</c> is a few. Reading whole fonts
+        /// (the earlier design) both dominated the first document's load time and, through
+        /// <see cref="_systemFontBytesCache"/>, kept the entire installed font set in memory. A face that
+        /// cannot be read is cached as null so a broken font is not reopened for every probe.
+        /// </summary>
+        private static readonly ConcurrentDictionary<(string Path, int FaceIndex), byte[]?> _systemCmapCache = new();
+
+        private readonly Dictionary<string, byte[]?> _customCmapCache = new(StringComparer.Ordinal);
+
         private readonly Dictionary<string, byte[]> _CustomFonts = [];
         private readonly Dictionary<string, FontFamilyModel> InstalledFonts;
 
@@ -55,20 +67,20 @@ namespace PeachDrawing.Text.Internal.Fonts
         private readonly HashSet<string> _customFamilyNames = new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
-        /// Per-face cmap-coverage cache (face name → covered codepoint ranges), populated lazily the
-        /// first time a face with no explicit <c>unicode-range</c> is coverage-tested during
-        /// per-codepoint matching. Instance-scoped (like <see cref="_CustomFonts"/>) so it is collected
-        /// with this resolver and never shared across <c>PdfGenerator</c> instances.
-        /// </summary>
-        private readonly Dictionary<string, IReadOnlyList<RuneInterval>> _coverageCache = new(StringComparer.Ordinal);
-
-        /// <summary>
         /// Last-resort system-fallback cache (codepoint value → winning family key, or null when no
         /// registered family covers it at all) populated by <see cref="FindFamilyCoveringCodepoint"/>.
-        /// Instance-scoped for the same reason as <see cref="_coverageCache"/> - never shared across
-        /// <c>PdfGenerator</c> instances/threads.
+        /// Instance-scoped (like the custom-font table) - never shared across <c>PdfGenerator</c>
+        /// instances/threads.
         /// </summary>
         private readonly Dictionary<(int Codepoint, EmojiPresentation Presentation), string?> _systemFallbackCache = new();
+
+        /// <summary>
+        /// Per-(face, script) overlap score used by <see cref="PickScriptAwareWinner"/>: how many
+        /// code points a face's coverage shares with a script's ranges. The score depends only on the
+        /// face and the script, and a CJK fallback search scores hundreds of candidate faces for one
+        /// character, so it is computed once per pair.
+        /// </summary>
+        private readonly Dictionary<(string Face, string Script), long> _scriptOverlapCache = new();
 
         /// <summary>
         /// This instance's own typeface-key-keyed resolver-info cache - the per-instance counterpart to
@@ -769,25 +781,106 @@ namespace PeachDrawing.Text.Internal.Fonts
         }
 
         /// <summary>
-        /// Whether <paramref name="entry"/> is used for <paramref name="rune"/>: inside its declared
-        /// <c>unicode-range</c> if it has one, else inside what its font's cmap actually covers (computed
-        /// lazily and cached per face, so only faces of an actually-requested family are ever scanned).
+        /// The <c>cmap</c> table of a face: copied out of the bytes of a custom/@font-face face, or read
+        /// straight from a system font file's table directory - never the whole font.
         /// </summary>
-        private bool FaceCovers(FontFaceEntry entry, Rune rune) => CMapCoverage.Contains(EffectiveCoverage(entry), rune);
+        private byte[]? GetCmapTable(string faceName)
+        {
+            if (_CustomFonts.TryGetValue(faceName, out var fontBytes))
+            {
+                if (_customCmapCache.TryGetValue(faceName, out var cached))
+                    return cached;
+
+                var table = CmapProbe.ExtractTable(fontBytes);
+                _customCmapCache[faceName] = table;
+                return table;
+            }
+
+            if (_systemFontPaths.TryGetValue(faceName, out var systemFont))
+                return _systemCmapCache.GetOrAdd(systemFont, static face => ReadCmapTable(face.Path, face.FaceIndex));
+
+            return null;
+        }
+
+        /// <summary>Reads one face's <c>cmap</c> table from its file, following the table directory of a collection face.</summary>
+        private static byte[]? ReadCmapTable(string path, int faceIndex)
+        {
+            try
+            {
+                using var stream = File.OpenRead(path);
+                uint[]? faces = SfntCollection.ReadFaceOffsets(stream);
+                long directory = faces is null ? 0 : faces[Math.Clamp(faceIndex, 0, faces.Length - 1)];
+
+                stream.Seek(directory, SeekOrigin.Begin);
+                Span<byte> header = stackalloc byte[12];
+                stream.ReadExactly(header);
+                int numTables = BinaryPrimitives.ReadUInt16BigEndian(header[4..]);
+
+                Span<byte> record = stackalloc byte[16];
+                for (var i = 0; i < numTables; i++)
+                {
+                    stream.ReadExactly(record);
+                    if (BinaryPrimitives.ReadUInt32BigEndian(record) != 0x636D6170) // 'cmap'
+                        continue;
+
+                    long offset = BinaryPrimitives.ReadUInt32BigEndian(record[8..]);
+                    long length = BinaryPrimitives.ReadUInt32BigEndian(record[12..]);
+                    if (offset < 0 || length <= 0 || offset + length > stream.Length)
+                        return null;
+
+                    var table = new byte[length];
+                    stream.Seek(offset, SeekOrigin.Begin);
+                    stream.ReadExactly(table);
+                    return table;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
+            {
+            }
+
+            return null;
+        }
 
         /// <summary>
-        /// A face's effective coverage for matching purposes: its explicit <c>unicode-range</c> when it
-        /// has one, else whatever its font's <c>cmap</c> actually covers - the same definition
-        /// <see cref="FaceCovers"/> uses for a single codepoint, exposed separately so
-        /// <see cref="PickScriptAwareWinner"/> can score a whole face's coverage rather than test one rune.
+        /// Whether <paramref name="entry"/> is used for <paramref name="rune"/>: inside its declared
+        /// <c>unicode-range</c> if it has one, else inside what its font's cmap actually covers - read by
+        /// the byte-level probe from the face's cached <c>cmap</c> table, never by parsing the font.
         /// </summary>
-        private IReadOnlyList<RuneInterval> EffectiveCoverage(FontFaceEntry entry) =>
-            entry.ExplicitRanges ?? GetOrComputeCoverage(entry.Description.FontNameInvariantCulture);
+        private bool FaceCovers(FontFaceEntry entry, Rune rune)
+        {
+            if (entry.ExplicitRanges is { } explicitRanges)
+                return CMapCoverage.Contains(explicitRanges, rune);
+
+            var cmap = GetCmapTable(entry.Description.FontNameInvariantCulture);
+            return cmap is not null && CmapProbe.Covers(cmap, rune.Value);
+        }
+
+        /// <summary>
+        /// How much of <paramref name="scriptRanges"/> a face covers - its explicit <c>unicode-range</c>
+        /// when it has one, else its own <c>cmap</c> read by <see cref="CmapProbe"/>. Cached per
+        /// (face, script) because the fallback search scores every candidate family for a character and
+        /// the answer never changes.
+        /// </summary>
+        private long ScriptOverlap(FontFaceEntry entry, string script, IReadOnlyList<RuneInterval> scriptRanges)
+        {
+            if (entry.ExplicitRanges is { } explicitRanges)
+                return OverlapLength(explicitRanges, scriptRanges);
+
+            var faceName = entry.Description.FontNameInvariantCulture;
+            if (_scriptOverlapCache.TryGetValue((faceName, script), out var cached))
+                return cached;
+
+            var cmap = GetCmapTable(faceName);
+            var overlap = cmap is null ? 0 : CmapProbe.OverlapWith(cmap, scriptRanges);
+
+            _scriptOverlapCache[(faceName, script)] = overlap;
+            return overlap;
+        }
 
         /// <summary>
         /// Whether <paramref name="entry"/> is a face to prefer for <paramref name="rune"/> drawn in
-        /// <paramref name="presentation"/> - see <see cref="EmojiProperties.FaceMatches"/>. Reads the face's
-        /// tables through the same shared font-source cache <see cref="GetOrComputeCoverage"/> uses.
+        /// <paramref name="presentation"/> - see <see cref="EmojiProperties.FaceMatches"/>. Reads the
+        /// face's tables through the same shared font-source cache every other per-face read uses.
         /// </summary>
         private bool FacePresentationMatches(FontFaceEntry entry, Rune rune, EmojiPresentation presentation)
         {
@@ -805,26 +898,6 @@ namespace PeachDrawing.Text.Internal.Fonts
                 // A face this reader cannot parse could not be drawn in either presentation.
                 return false;
             }
-        }
-
-        private IReadOnlyList<RuneInterval> GetOrComputeCoverage(string faceName)
-        {
-            if (_coverageCache.TryGetValue(faceName, out var cached))
-                return cached;
-
-            IReadOnlyList<RuneInterval> coverage;
-            try
-            {
-                var fontSource = FontFileData.GetOrCreateFrom(GetFont(faceName));
-                coverage = CMapCoverage.Extract(fontSource.Fontface?.cmap);
-            }
-            catch
-            {
-                coverage = [];
-            }
-
-            _coverageCache[faceName] = coverage;
-            return coverage;
         }
 
         /// <summary>
@@ -903,7 +976,7 @@ namespace PeachDrawing.Text.Internal.Fonts
             {
                 var family = InstalledFonts[key];
                 var coveringFace = family.Faces.First(usable);
-                var overlap = OverlapLength(EffectiveCoverage(coveringFace), scriptRanges);
+                var overlap = ScriptOverlap(coveringFace, script, scriptRanges);
 
                 if (overlap > bestOverlap)
                 {
