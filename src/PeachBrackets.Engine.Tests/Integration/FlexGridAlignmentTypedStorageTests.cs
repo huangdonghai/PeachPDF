@@ -90,6 +90,28 @@ namespace PeachPDF.Tests.Integration
             Assert.Equal(JustifyItem.Auto, box.JustifySelf.Value);
         }
 
+        [Fact]
+        public async Task AlignSelf_UnsafePrefixedUnknownKeyword_IsIgnoredRatherThanThrowing()
+        {
+            // "safe <keyword>" where the keyword is not one the wrapped converter accepts is an invalid
+            // declaration. It used to be kept as a value whose CssText threw on read (null inner value),
+            // which took down any page using it - e.g. `justify-self: safe anchor-center`.
+            var box = await GetBoxAsync("<div style='display:flex'><div id='el' style='align-self:safe nonsense'></div></div>");
+
+            Assert.Equal(AlignItem.Auto, box.AlignSelf.Value);
+        }
+
+        [Fact]
+        public async Task PlaceSelf_SingleKeyword_AppliesToBothAxes()
+        {
+            // place-self's justify half receives no tokens of its own, and the prefix converter used to
+            // read past the end of that empty list (an InvalidOperationException from the enumerator).
+            var box = await GetBoxAsync("<div style='display:grid'><div id='el' style='place-self:start'></div></div>");
+
+            Assert.Equal(AlignItem.Start, box.AlignSelf.Value);
+            Assert.Equal(JustifyItem.Start, box.JustifySelf.Value);
+        }
+
         // ─── Helpers ─────────────────────────────────────────────────────────────
 
         private static async Task<CssBox> GetBoxAsync(string bodyHtml)

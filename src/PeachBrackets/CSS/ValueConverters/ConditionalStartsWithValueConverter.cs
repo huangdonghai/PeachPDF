@@ -22,12 +22,21 @@ namespace PeachBrackets.Css
         {
             var enumerator = value.GetEnumerator();
 
-            while (enumerator.MoveNext() && enumerator.Current.Type == TokenType.Whitespace)
+            var found = false;
+
+            while (enumerator.MoveNext())
             {
-                //Empty on purpose.
+                if (enumerator.Current.Type == TokenType.Whitespace)
+                    continue;
+
+                found = true;
+                break;
             }
 
-            if (enumerator.Current.Type != TokenType.Ident)
+            // A half of a two-value shorthand (place-self's justify side, an empty declaration) has no
+            // token to read: Current after the final MoveNext is undefined, and an array-backed list
+            // throws for it rather than answering a default.
+            if (!found || enumerator.Current.Type != TokenType.Ident)
                 return null;
 
             var consumedPrefix = _prefixKeywords.FindIs(enumerator.Current.Data);
@@ -46,7 +55,10 @@ namespace PeachBrackets.Css
 
             var result = _converter.Convert(remainingTokens);
 
-            if (result != null && result.CssText != _when)
+            // The prefix has to introduce a value the wrapped converter accepts: "safe nonsense" is an
+            // invalid declaration. Letting a null result through built a value with no CssText to read,
+            // which threw the moment anything asked for the property's text.
+            if (result is null || result.CssText != _when)
                 return null;
 
             return new ConditionalStartValue(consumedPrefix, result, value);
