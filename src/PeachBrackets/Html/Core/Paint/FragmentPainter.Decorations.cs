@@ -368,6 +368,7 @@ namespace PeachBrackets.Html.Paint
             void CollectUprightWord(BoxFragment f, CssRect word, Rect rect, string text, CssBox styleSource, Font font, double baselineAdjust, ShapeSettings features)
             {
                 var needsCellClip = font.HasVerticalMetrics || font.HasVerticalOrigin;
+                features = UprightVerticalShapingFeatures(features);
 
                 foreach (var placement in EnumerateUprightGlyphPlacements(g, text, font, rect, baselineAdjust, styleSource.ActualLetterSpacing, features))
                 {

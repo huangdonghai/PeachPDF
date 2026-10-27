@@ -584,7 +584,8 @@ namespace PeachBrackets.Html.Paint
             }
 
             double total = 0;
-            foreach (var (_, rune, _) in CssLayoutEngine.MeasureUprightRunCharacters(g, text, font, styleSource.ActualTextShapingFeatures))
+            var features = UprightVerticalShapingFeatures(styleSource.ActualTextShapingFeatures);
+            foreach (var (_, rune, _) in CssLayoutEngine.MeasureUprightRunCharacters(g, text, font, features))
             {
                 total += font.HasVerticalMetrics ? font.GetVerticalAdvance(rune) : font.Height;
                 total += styleSource.ActualLetterSpacing;

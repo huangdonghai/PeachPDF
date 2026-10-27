@@ -458,6 +458,59 @@ namespace PeachBrackets.Html.Paint
             };
 
         /// <summary>
+        /// The shaping settings for an upright run in a vertical writing mode: CSS Writing Modes requires
+        /// the <c>vert</c> feature there (css-writing-modes-4 §5.1), which replaces a font's punctuation
+        /// with its vertical presentation forms - a CJK full stop's or bracket's ink sits in a different
+        /// part of the em box vertically than horizontally, so shaping without it draws them in their
+        /// horizontal positions. An explicit <c>vert</c> setting (CSS <c>font-feature-settings</c>) is
+        /// left exactly as authored.
+        /// </summary>
+        /// <remarks>
+        /// The merged settings are cached per input: <c>ShapeSettings</c> compares its explicit-feature
+        /// list by reference, and both the shaper's run cache and its GSUB lookup-index cache key on the
+        /// whole value - handing each word a freshly-built list would miss both for every character of
+        /// an upright run.
+        /// </remarks>
+        internal static ShapeSettings UprightVerticalShapingFeatures(ShapeSettings? features)
+        {
+            var settings = features ?? ShapeSettings.Default;
+            if (UprightVerticalFeaturesCache.TryGetValue(settings, out var cached))
+            {
+                return cached;
+            }
+
+            var merged = settings;
+            var alreadyRequested = false;
+            if (settings.ExplicitFeatures is { } explicitFeatures)
+            {
+                foreach (var feature in explicitFeatures)
+                {
+                    if (string.Equals(feature.Tag, "vert", StringComparison.OrdinalIgnoreCase))
+                    {
+                        alreadyRequested = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!alreadyRequested)
+            {
+                var mergedFeatures = new List<FeatureSetting>((settings.ExplicitFeatures?.Count ?? 0) + 1);
+                if (settings.ExplicitFeatures is { } existing)
+                {
+                    mergedFeatures.AddRange(existing);
+                }
+
+                mergedFeatures.Add(new FeatureSetting("vert", 1));
+                merged = settings with { ExplicitFeatures = mergedFeatures };
+            }
+
+            return UprightVerticalFeaturesCache.GetOrAdd(settings, merged);
+        }
+
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<ShapeSettings, ShapeSettings> UprightVerticalFeaturesCache = new();
+
+        /// <summary>
         /// Paints an upright (unrotated) run within a vertical writing mode - one or more codepoints
         /// classified <see cref="PeachDrawing.Text.Unicode.VerticalOrientationClass.U"/>/
         /// <see cref="PeachDrawing.Text.Unicode.VerticalOrientationClass.Tu"/> (<see cref="CssRect.IsUprightOrientation"/>),
@@ -531,6 +584,8 @@ namespace PeachBrackets.Html.Paint
         /// </remarks>
         private static void PaintUprightVerticalRun(Canvas g, string text, Font font, CssBox styleSource, Rect rect, double baselineAdjust, ShapeSettings wordFeatures, string? logicalText = null)
         {
+            wordFeatures = UprightVerticalShapingFeatures(wordFeatures);
+
             var hasVerticalMetrics = font.HasVerticalMetrics;
             var hasVerticalOrigin = font.HasVerticalOrigin;
 

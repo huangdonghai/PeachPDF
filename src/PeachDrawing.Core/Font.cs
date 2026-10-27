@@ -194,13 +194,13 @@ namespace PeachDrawing.Core
         /// </summary>
         public virtual double GetVerticalAdvance(System.Text.Rune rune) => Height;
 
-        /// <summary>Whether this font carries a real OpenType <c>VORG</c> table this reader trusts (see
-        /// <c>OpenTypeDescriptor.HasVerticalOrigin</c> for the CFF-only
-        /// restriction that gates this).</summary>
+        /// <summary>Whether this font can report a real per-glyph vertical origin - from a <c>VORG</c>
+        /// table, or (for TrueType outlines, which have none) the origin OpenType derives from the
+        /// glyph's own <c>vmtx</c> top side bearing.</summary>
         public virtual bool HasVerticalOrigin => false;
 
         /// <summary>
-        /// This rune's real <c>VORG</c> vertical-origin Y, in the same pixel units as <see cref="Ascent"/>
+        /// This rune's real vertical-origin Y, in the same pixel units as <see cref="Ascent"/>
         /// (baseline-relative, same convention). Only meaningful when <see cref="HasVerticalOrigin"/> is
         /// true; the default reproduces the plain top-of-cell anchor used when it's false (see
         /// <c>FragmentPainter.Text.cs</c>'s <c>PaintUprightVerticalRun</c> remarks for the derivation).
