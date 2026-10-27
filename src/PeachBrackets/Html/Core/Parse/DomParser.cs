@@ -2492,11 +2492,11 @@ namespace PeachBrackets.Html.Parse
                     Keywords.Revert
                         => revertTarget is not null && revertTarget.TryGetValue(prop.Name, out var rv) && rv is not null
                             ? rv
-                            : IsLogicalMargin(prop.Name) ? CssUtils.GetPropertyValue(box, prop.Name) : CssDefaults.GetInitialValue(prop.Name),
+                            : IsLogicalMargin(prop.Name) ? CssUtils.GetPropertyValue(box, prop.Name) ?? box.UaLogicalMargin(prop.Name) : CssDefaults.GetInitialValue(prop.Name),
                     Keywords.RevertLayer
                         => revertLayerTarget is not null && revertLayerTarget.TryGetValue(prop.Name, out var rvl) && rvl is not null
                             ? rvl
-                            : IsLogicalMargin(prop.Name) ? CssUtils.GetPropertyValue(box, prop.Name) : CssDefaults.GetInitialValue(prop.Name),
+                            : IsLogicalMargin(prop.Name) ? CssUtils.GetPropertyValue(box, prop.Name) ?? box.UaLogicalMargin(prop.Name) : CssDefaults.GetInitialValue(prop.Name),
                     _ => VendorValueAliases.Normalize(prop.Name, prop.Value)
                 };
 
