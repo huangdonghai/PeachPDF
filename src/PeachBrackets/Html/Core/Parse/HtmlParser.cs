@@ -91,7 +91,17 @@ namespace PeachBrackets.Html.Parse
 
                             if (curBox.HtmlTag?.Name.Equals(HtmlConstants.NoScript, StringComparison.OrdinalIgnoreCase) == true)
                             {
-                                curBox = ParseDocument(text.Data, curBox);
+                                // <noscript> content is markup here - this renderer runs no script - so it is
+                                // parsed rather than shown as raw text. Parsing it against the noscript box
+                                // itself would hand the same text straight back to this branch (the box would
+                                // still be the noscript element inside the recursive call) and recurse until
+                                // the stack ends the process, so the fragment gets a root of its own and what
+                                // it built moves inside the element.
+                                var fragment = ParseDocument(text.Data);
+                                foreach (var child in fragment.Boxes.ToList())
+                                {
+                                    child.ParentBox = curBox;
+                                }
                             }
                             else
                             {
