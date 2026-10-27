@@ -38,5 +38,26 @@ namespace PeachDrawing.Text.Tests.Text
             var rune = new System.Text.Rune(0x4E00);
             Assert.Equal(VerticalOrientationTable.Of(0x4E00), VerticalOrientationTable.Of(rune));
         }
+
+        [Theory]
+        [InlineData(0xFF1A)] // FULLWIDTH COLON - Tr: its vertical form is an upright colon
+        [InlineData(0xFF1B)] // FULLWIDTH SEMICOLON
+        [InlineData(0x300C)] // LEFT CORNER BRACKET - Tr: its vertical form is the rotated bracket
+        [InlineData(0x201C)] // LEFT DOUBLE QUOTATION MARK
+        public void IsEffectivelyUpright_TreatsTransformedRunsAsUpright(int codepoint)
+        {
+            // Tr ("transformed typographically, with fallback to rotated") renders upright once the font's
+            // vertical form is requested via `vert` - Chrome does exactly that with LXGW WenKai, whose
+            // U+FE13 vertical colon is upright where the rotated U+FF1A would lie on its side.
+            Assert.True(VerticalOrientationTable.IsEffectivelyUpright(new System.Text.Rune(codepoint)));
+        }
+
+        [Theory]
+        [InlineData(0x41)]   // LATIN CAPITAL LETTER A - genuinely rotated
+        [InlineData(0x30)]   // DIGIT ZERO
+        public void IsEffectivelyUpright_LeavesRotatedRunsRotated(int codepoint)
+        {
+            Assert.False(VerticalOrientationTable.IsEffectivelyUpright(new System.Text.Rune(codepoint)));
+        }
     }
 }

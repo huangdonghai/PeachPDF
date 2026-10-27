@@ -63,13 +63,15 @@ namespace PeachDrawing.Text.Internal.Text
         /// vertical writing modes' <c>text-orientation: mixed</c> - the single "effectively upright"
         /// decision both the HTML (<c>CssBox.IsEffectivelyUpright</c>) and SVG (<c>SvgRenderer</c>) text
         /// pipelines classify a character by, kept in one place since both pipelines share PeachPDF's
-        /// only Vertical_Orientation table. <see cref="VerticalOrientationClass.Tu"/>/<see cref="VerticalOrientationClass.Tr"/>
-        /// ("transformed" - meaning a dedicated vertical glyph form exists) collapse to their own
-        /// fallback (upright/rotated respectively) since PeachPDF has no vertical-form GSUB substitution
-        /// (<c>vert</c>/<c>vrt2</c>) to render the dedicated form itself.
+        /// only Vertical_Orientation table. <see cref="VerticalOrientationClass.Tu"/> and
+        /// <see cref="VerticalOrientationClass.Tr"/> are both "transformed typographically, with fallback
+        /// to upright/rotated" - the font supplies the vertical presentation form (U+FF1A's is an upright
+        /// colon, U+300C's a rotated corner bracket), and the HTML paint path now requests it with the
+        /// `vert` feature, so both are upright. A font lacking the form would leave Tr rotated per UAX #50;
+        /// that fallback is not distinguished here (it would need per-rune GSUB coverage).
         /// </summary>
         public static bool IsEffectivelyUpright(System.Text.Rune rune) =>
-            Of(rune) is VerticalOrientationClass.U or VerticalOrientationClass.Tu;
+            Of(rune) is VerticalOrientationClass.U or VerticalOrientationClass.Tu or VerticalOrientationClass.Tr;
 
         private static Run[] LoadRuns()
         {
